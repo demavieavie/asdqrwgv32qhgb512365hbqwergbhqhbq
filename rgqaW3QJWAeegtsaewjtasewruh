@@ -3126,19 +3126,32 @@ function Chloex:Window(GuiConfig)
                     asset = "rbxassetid://" .. asset
                 end
 
+                local ratio = BannerConfig.AspectRatio or (16 / 5)
+
                 local Banner = Instance.new("Frame")
                 Banner.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
                 Banner.BackgroundTransparency = 0.2
                 Banner.BorderSizePixel = 0
                 Banner.ClipsDescendants = true
                 Banner.LayoutOrder = CountItem
-                Banner.Size = UDim2.new(1, 0, 0, BannerConfig.Height or 110)
+                Banner.Size = UDim2.new(1, 0, 0, 110)
                 Banner.Name = "Banner"
                 Banner.Parent = SectionAdd
 
                 local BannerCorner = Instance.new("UICorner")
                 BannerCorner.CornerRadius = UDim.new(0, 8)
                 BannerCorner.Parent = Banner
+
+                local function FitHeight()
+                    local w = Banner.AbsoluteSize.X
+                    if w > 0 then
+                        local h = math.floor(w / ratio)
+                        if math.abs(Banner.Size.Y.Offset - h) > 1 then
+                            Banner.Size = UDim2.new(1, 0, 0, h)
+                            UpdateSizeSection()
+                        end
+                    end
+                end
 
                 if asset ~= "" then
                     local Img = Instance.new("ImageLabel")
@@ -3167,6 +3180,7 @@ function Chloex:Window(GuiConfig)
                     VerPill.AnchorPoint = Vector2.new(1, 0)
                     VerPill.Position = UDim2.new(1, -8, 0, 8)
                     VerPill.Size = UDim2.new(0, 52, 0, 20)
+                    VerPill.ZIndex = 3
                     VerPill.Name = "VersionPill"
                     VerPill.Parent = Banner
 
@@ -3181,23 +3195,15 @@ function Chloex:Window(GuiConfig)
                     VerLabel.TextSize = 10
                     VerLabel.BackgroundTransparency = 1
                     VerLabel.Size = UDim2.new(1, 0, 1, 0)
+                    VerLabel.ZIndex = 4
                     VerLabel.Parent = VerPill
                 end
 
-                if BannerConfig.Title then
-                    local TitleLabel = Instance.new("TextLabel")
-                    TitleLabel.Font = Enum.Font.GothamBold
-                    TitleLabel.Text = BannerConfig.Title
-                    TitleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-                    TitleLabel.TextSize = 18
-                    TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
-                    TitleLabel.BackgroundTransparency = 1
-                    TitleLabel.AnchorPoint = Vector2.new(0, 1)
-                    TitleLabel.Position = UDim2.new(0, 12, 1, -12)
-                    TitleLabel.Size = UDim2.new(1, -24, 0, 20)
-                    TitleLabel.Name = "BannerTitle"
-                    TitleLabel.Parent = Banner
-                end
+                Banner:GetPropertyChangedSignal("AbsoluteSize"):Connect(FitHeight)
+                task.spawn(function()
+                    task.wait()
+                    FitHeight()
+                end)
 
                 CountItem = CountItem + 1
                 return Banner
@@ -3385,9 +3391,8 @@ function Chloex:Window(GuiConfig)
         if InfoConfig.Banner and InfoConfig.Banner ~= "" then
             Items:AddBanner({
                 Image = InfoConfig.Banner,
-                Title = InfoConfig.Title,
                 Version = InfoConfig.Version,
-                Height = InfoConfig.BannerHeight,
+                AspectRatio = InfoConfig.BannerAspectRatio,
             })
         end
 
