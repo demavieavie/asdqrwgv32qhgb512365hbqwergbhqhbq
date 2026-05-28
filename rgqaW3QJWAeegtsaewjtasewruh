@@ -1,188 +1,55 @@
---// credit: ChloeX
---// modified: .badmagazine
---// Olympus
-
 local HttpService = game:GetService("HttpService")
 
-if not isfolder("Olympus") then
-    makefolder("Olympus")
+if not isfolder("WisHub") then
+    makefolder("WisHub")
+end
+if not isfolder("WisHub/Config") then
+    makefolder("WisHub/Config")
 end
 
 local gameName   = tostring(game:GetService("MarketplaceService"):GetProductInfo(game.PlaceId).Name)
 gameName         = gameName:gsub("[^%w_ ]", "")
 gameName         = gameName:gsub("%s+", "_")
 
-local gameFolder = "Olympus/" .. gameName
-if not isfolder(gameFolder) then
-    makefolder(gameFolder)
-end
+local ConfigFile = "WisHub/Config/" .. gameName .. ".json"
 
-local CurrentConfigName = nil
-local AutoloadFile      = gameFolder .. "/autoload.txt"
+ConfigData       = {}
+Elements         = {}
+CURRENT_VERSION  = nil
 
-ConfigData              = {}
-Elements                = {}
-CURRENT_VERSION         = nil
-
--- Get list of all config files in game folder
-function GetConfigList()
-    local configs = {}
-    if isfolder and listfiles then
-        local files = listfiles(gameFolder)
-        for _, filepath in pairs(files) do
-            local filename = filepath:match("([^/\\]+)%.json$")
-            if filename then
-                table.insert(configs, filename)
-            end
-        end
-    end
-    return configs
-end
-
--- Get autoload config name from autoload.txt
-function GetAutoload()
-    if isfile and isfile(AutoloadFile) then
-        local success, content = pcall(function()
-            return readfile(AutoloadFile)
-        end)
-        if success and content and content ~= "" then
-            return content:match("^%s*(.-)%s*$") -- trim whitespace
-        end
-    end
-    return nil
-end
-
--- Set autoload config
-function SetAutoload(configName)
+function SaveConfig()
     if writefile then
-        writefile(AutoloadFile, configName)
-        print("Autoload config set to: " .. configName)
-    end
-end
-
--- Clear autoload config
-function ClearAutoload()
-    if delfile and isfile(AutoloadFile) then
-        delfile(AutoloadFile)
-        print("Autoload config cleared")
-    end
-end
-
--- Save config with specific name
-function SaveConfigAs(configName)
-    if not configName or configName == "" then
-        warn("Config name cannot be empty")
-        return false
-    end
-
-    if writefile then
-        local filepath = gameFolder .. "/" .. configName .. ".json"
         ConfigData._version = CURRENT_VERSION
-        writefile(filepath, HttpService:JSONEncode(ConfigData))
-        CurrentConfigName = configName
-        print("Config saved as: " .. configName)
-        return true
+        writefile(ConfigFile, HttpService:JSONEncode(ConfigData))
     end
-    return false
 end
 
--- Load config from specific name
-function LoadConfig(configName)
-    if not configName or configName == "" then
-        warn("Config name cannot be empty")
-        return false
-    end
-
-    local filepath = gameFolder .. "/" .. configName .. ".json"
-
-    if not CURRENT_VERSION then return false end
-    if isfile and isfile(filepath) then
+function LoadConfigFromFile()
+    if not CURRENT_VERSION then return end
+    if isfile and isfile(ConfigFile) then
         local success, result = pcall(function()
-            return HttpService:JSONDecode(readfile(filepath))
+            return HttpService:JSONDecode(readfile(ConfigFile))
         end)
         if success and type(result) == "table" then
             if result._version == CURRENT_VERSION then
                 ConfigData = result
-                CurrentConfigName = configName
-                LoadConfigElements()
-                print("Config loaded: " .. configName)
-                return true
             else
-                warn("Config version mismatch")
-                return false
+                ConfigData = { _version = CURRENT_VERSION }
             end
         else
-            warn("Failed to decode config")
-            return false
+            ConfigData = { _version = CURRENT_VERSION }
         end
     else
-        warn("Config file not found: " .. configName)
-        return false
+        ConfigData = { _version = CURRENT_VERSION }
     end
 end
 
--- Delete config
-function DeleteConfig(configName)
-    if not configName or configName == "" then
-        warn("Config name cannot be empty")
-        return false
-    end
-
-    local filepath = gameFolder .. "/" .. configName .. ".json"
-    if delfile and isfile(filepath) then
-        delfile(filepath)
-        print("Config deleted: " .. configName)
-
-        -- If deleted config was autoload, clear autoload
-        if GetAutoload() == configName then
-            ClearAutoload()
-        end
-
-        return true
-    else
-        warn("Config file not found: " .. configName)
-        return false
-    end
-end
-
--- Load config elements into UI
 function LoadConfigElements()
     for key, element in pairs(Elements) do
         if ConfigData[key] ~= nil and element.Set then
             element:Set(ConfigData[key], true)
         end
     end
-end
-
--- Reset all elements to default
-function ResetElements()
-    -- Clear ConfigData
-    ConfigData = { _version = CURRENT_VERSION }
-
-    -- Reset elements berdasarkan type
-    for key, element in pairs(Elements) do
-        if element.Set then
-            pcall(function()
-                -- Detect type berdasarkan key prefix
-                if key:match("^Toggle_") then
-                    element:Set(false)  -- Toggle default = false
-                elseif key:match("^Slider_") then
-                    element:Set(20)  -- Slider default = 20
-                elseif key:match("^Input_") then
-                    element:Set("")  -- Input default = ""
-                elseif key:match("^Dropdown_") then
-                    -- Dropdown bisa multi atau single
-                    if type(element.Value) == "table" then
-                        element:Set({})  -- Multi dropdown = empty table
-                    else
-                        element:Set(nil)  -- Single dropdown = nil
-                    end
-                end
-            end)
-        end
-    end
-
-    print("Elements reset to defaults")
 end
 
 local Icons = {
@@ -396,7 +263,7 @@ end
 local Chloex = {}
 function Chloex:MakeNotify(NotifyConfig)
     local NotifyConfig = NotifyConfig or {}
-    NotifyConfig.Title = NotifyConfig.Title or "Olympus"
+    NotifyConfig.Title = NotifyConfig.Title or "WisHub"
     NotifyConfig.Description = NotifyConfig.Description or "Notification"
     NotifyConfig.Content = NotifyConfig.Content or "Content"
     NotifyConfig.Color = NotifyConfig.Color or Color3.fromRGB(255, 0, 255)
@@ -592,38 +459,91 @@ function Chloex:MakeNotify(NotifyConfig)
     return NotifyFunction
 end
 
-function chloex(msg, delay, color, title, desc)
+function than(msg, delay, color, title, desc)
     return Chloex:MakeNotify({
-        Title = title or "Olympus",
+        Title = title or "WisHub",
         Description = desc or "Notification",
         Content = msg or "Content",
-        Color = color or Color3.fromRGB(255, 40, 40),
+        Color = color or Color3.fromRGB(0, 208, 255),
         Delay = delay or 4
     })
 end
 
 function Chloex:Window(GuiConfig)
     GuiConfig              = GuiConfig or {}
-    GuiConfig.Title        = GuiConfig.Title or "Chloe X"
-    GuiConfig.Footer       = GuiConfig.Footer or "Chloee :3"
+    GuiConfig.Title        = GuiConfig.Title or "WisHub"
+    GuiConfig.Footer       = GuiConfig.Footer or ""
     GuiConfig.Color        = GuiConfig.Color or Color3.fromRGB(255, 0, 255)
     GuiConfig["Tab Width"] = GuiConfig["Tab Width"] or 120
     GuiConfig.Version      = GuiConfig.Version or 1
+    if GuiConfig.Search == nil then GuiConfig.Search = true end
 
     CURRENT_VERSION        = GuiConfig.Version
-
-    -- Try to autoload config if set
-    local autoloadName = GetAutoload()
-    if autoloadName then
-        LoadConfig(autoloadName)
-    else
-        -- Initialize with default empty config
-        ConfigData = { _version = CURRENT_VERSION }
-    end
+    LoadConfigFromFile()
 
     local GuiFunc = {}
 
-    local Chloeex = Instance.new("ScreenGui");
+    local SearchRegistry = {}
+    local TabRegistry = {}
+
+    local function SmartMatch(query, target)
+        if query == "" then return 0 end
+        local q, t = string.lower(query), string.lower(target)
+        if q == t then return 1000 end
+        if string.sub(t, 1, #q) == q then return 800 end
+        local idx = string.find(t, q, 1, true)
+        if idx then return 600 - idx end
+        local qi, ti, lastIdx = 1, 1, 0
+        while qi <= #q and ti <= #t do
+            if string.sub(q, qi, qi) == string.sub(t, ti, ti) then
+                lastIdx = ti
+                qi = qi + 1
+            end
+            ti = ti + 1
+        end
+        if qi > #q then
+            return 200 - (lastIdx - #q) * 2
+        end
+        return 0
+    end
+
+    local function RegisterSearch(entry)
+        table.insert(SearchRegistry, entry)
+    end
+
+    function GuiFunc:ExportConfig()
+        local payload = HttpService:JSONEncode({ Game = gameName, Version = CURRENT_VERSION, Data = ConfigData })
+        if setclipboard then
+            setclipboard(payload)
+            than("Config copied to clipboard", 4, GuiConfig.Color, "WisHub", "Export")
+        end
+        return payload
+    end
+
+    function GuiFunc:ImportConfig(str)
+        if not str or str == "" then
+            than("Paste a config string first", 4, Color3.fromRGB(255, 90, 90), "WisHub", "Import")
+            return false
+        end
+        local ok, dec = pcall(function() return HttpService:JSONDecode(str) end)
+        if not ok or type(dec) ~= "table" then
+            than("Invalid config format", 4, Color3.fromRGB(255, 90, 90), "WisHub", "Import")
+            return false
+        end
+        local data = dec.Data or dec
+        for key, value in pairs(data) do
+            ConfigData[key] = value
+            if Elements[key] and Elements[key].Set then
+                pcall(function() Elements[key]:Set(value, true) end)
+            end
+        end
+        ConfigData._version = CURRENT_VERSION
+        SaveConfig()
+        than("Config imported", 4, GuiConfig.Color, "WisHub", "Import")
+        return true
+    end
+
+    local NatUI = Instance.new("ScreenGui");
     local DropShadowHolder = Instance.new("Frame");
     local DropShadow = Instance.new("ImageLabel");
     local Main = Instance.new("Frame");
@@ -646,10 +566,10 @@ function Chloex:Window(GuiConfig)
     local LayersFolder = Instance.new("Folder");
     local LayersPageLayout = Instance.new("UIPageLayout");
 
-    Chloeex.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-    Chloeex.Name = "Chloeex"
-    Chloeex.ResetOnSpawn = false
-    Chloeex.Parent = game:GetService("CoreGui")
+    NatUI.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    NatUI.Name = "NatUI"
+    NatUI.ResetOnSpawn = false
+    NatUI.Parent = game:GetService("CoreGui")
 
     DropShadowHolder.BackgroundTransparency = 1
     DropShadowHolder.BorderSizePixel = 0
@@ -662,10 +582,10 @@ function Chloex:Window(GuiConfig)
     end
     DropShadowHolder.ZIndex = 0
     DropShadowHolder.Name = "DropShadowHolder"
-    DropShadowHolder.Parent = Chloeex
+    DropShadowHolder.Parent = NatUI
 
-    DropShadowHolder.Position = UDim2.new(0, (Chloeex.AbsoluteSize.X // 2 - DropShadowHolder.Size.X.Offset // 2), 0,
-        (Chloeex.AbsoluteSize.Y // 2 - DropShadowHolder.Size.Y.Offset // 2))
+    DropShadowHolder.Position = UDim2.new(0, (NatUI.AbsoluteSize.X // 2 - DropShadowHolder.Size.X.Offset // 2), 0,
+        (NatUI.AbsoluteSize.Y // 2 - DropShadowHolder.Size.Y.Offset // 2))
     DropShadow.Image = "rbxassetid://6015897843"
     DropShadow.ImageColor3 = Color3.fromRGB(15, 15, 15)
     DropShadow.ImageTransparency = 1
@@ -867,7 +787,12 @@ function Chloex:Window(GuiConfig)
     ScrollTab.BackgroundTransparency = 0.9990000128746033
     ScrollTab.BorderColor3 = Color3.fromRGB(0, 0, 0)
     ScrollTab.BorderSizePixel = 0
-    ScrollTab.Size = UDim2.new(1, 0, 1, 0)
+    if GuiConfig.Search then
+        ScrollTab.Position = UDim2.new(0, 0, 0, 34)
+        ScrollTab.Size = UDim2.new(1, 0, 1, -34)
+    else
+        ScrollTab.Size = UDim2.new(1, 0, 1, 0)
+    end
     ScrollTab.Name = "ScrollTab"
     ScrollTab.Parent = LayersTab
 
@@ -887,9 +812,190 @@ function Chloex:Window(GuiConfig)
     ScrollTab.ChildAdded:Connect(UpdateSize1)
     ScrollTab.ChildRemoved:Connect(UpdateSize1)
 
+    local SearchResults, SearchResultsLayout, SearchBox
+    if GuiConfig.Search then
+        local SearchBar = Instance.new("Frame")
+        SearchBar.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+        SearchBar.BackgroundTransparency = 0.93
+        SearchBar.BorderSizePixel = 0
+        SearchBar.Position = UDim2.new(0, 0, 0, 0)
+        SearchBar.Size = UDim2.new(1, 0, 0, 28)
+        SearchBar.Name = "SearchBar"
+        SearchBar.Parent = LayersTab
+
+        local SearchCorner = Instance.new("UICorner")
+        SearchCorner.CornerRadius = UDim.new(0, 4)
+        SearchCorner.Parent = SearchBar
+
+        local SearchIcon = Instance.new("ImageLabel")
+        SearchIcon.Image = Icons.scan
+        SearchIcon.ImageColor3 = Color3.fromRGB(200, 200, 200)
+        SearchIcon.BackgroundTransparency = 1
+        SearchIcon.ScaleType = Enum.ScaleType.Fit
+        SearchIcon.Position = UDim2.new(0, 7, 0.5, 0)
+        SearchIcon.AnchorPoint = Vector2.new(0, 0.5)
+        SearchIcon.Size = UDim2.new(0, 14, 0, 14)
+        SearchIcon.Name = "SearchIcon"
+        SearchIcon.Parent = SearchBar
+
+        SearchBox = Instance.new("TextBox")
+        SearchBox.Font = Enum.Font.GothamBold
+        SearchBox.PlaceholderText = "Search..."
+        SearchBox.PlaceholderColor3 = Color3.fromRGB(130, 130, 130)
+        SearchBox.Text = ""
+        SearchBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+        SearchBox.TextSize = 12
+        SearchBox.TextXAlignment = Enum.TextXAlignment.Left
+        SearchBox.ClearTextOnFocus = false
+        SearchBox.BackgroundTransparency = 1
+        SearchBox.AnchorPoint = Vector2.new(0, 0.5)
+        SearchBox.Position = UDim2.new(0, 28, 0.5, 0)
+        SearchBox.Size = UDim2.new(1, -34, 1, -6)
+        SearchBox.Name = "SearchBox"
+        SearchBox.Parent = SearchBar
+
+        SearchResults = Instance.new("ScrollingFrame")
+        SearchResults.Active = true
+        SearchResults.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+        SearchResults.BackgroundTransparency = 0.05
+        SearchResults.BorderSizePixel = 0
+        SearchResults.ScrollBarThickness = 2
+        SearchResults.ScrollBarImageColor3 = GuiConfig.Color
+        SearchResults.CanvasSize = UDim2.new(0, 0, 0, 0)
+        SearchResults.Position = UDim2.new(0, 0, 0, 34)
+        SearchResults.Size = UDim2.new(1, 0, 1, -34)
+        SearchResults.Visible = false
+        SearchResults.ZIndex = 20
+        SearchResults.Name = "SearchResults"
+        SearchResults.Parent = LayersTab
+
+        local SearchResultsCorner = Instance.new("UICorner")
+        SearchResultsCorner.CornerRadius = UDim.new(0, 4)
+        SearchResultsCorner.Parent = SearchResults
+
+        SearchResultsLayout = Instance.new("UIListLayout")
+        SearchResultsLayout.Padding = UDim.new(0, 4)
+        SearchResultsLayout.SortOrder = Enum.SortOrder.LayoutOrder
+        SearchResultsLayout.Parent = SearchResults
+
+        local SearchPad = Instance.new("UIPadding")
+        SearchPad.PaddingTop = UDim.new(0, 4)
+        SearchPad.PaddingBottom = UDim.new(0, 4)
+        SearchPad.PaddingLeft = UDim.new(0, 4)
+        SearchPad.PaddingRight = UDim.new(0, 4)
+        SearchPad.Parent = SearchResults
+
+        SearchResultsLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+            SearchResults.CanvasSize = UDim2.new(0, 0, 0, SearchResultsLayout.AbsoluteContentSize.Y + 8)
+        end)
+
+        local function RunSearch()
+            local q = string.gsub(string.gsub(string.lower(SearchBox.Text), "^%s+", ""), "%s+$", "")
+            for _, c in pairs(SearchResults:GetChildren()) do
+                if c:IsA("GuiObject") then c:Destroy() end
+            end
+            if q == "" then
+                SearchResults.Visible = false
+                ScrollTab.Visible = true
+                return
+            end
+            ScrollTab.Visible = false
+            SearchResults.Visible = true
+
+            local scored = {}
+            for _, entry in ipairs(SearchRegistry) do
+                local score = SmartMatch(q, entry.label)
+                if score > 0 then
+                    table.insert(scored, { entry = entry, score = score })
+                end
+            end
+            table.sort(scored, function(a, b) return a.score > b.score end)
+
+            local found = 0
+            for _, s in ipairs(scored) do
+                local entry = s.entry
+                local Row = Instance.new("Frame")
+                Row.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+                Row.BackgroundTransparency = 0.93
+                Row.BorderSizePixel = 0
+                Row.Size = UDim2.new(1, 0, 0, 40)
+                Row.LayoutOrder = found
+                Row.ZIndex = 21
+                Row.Name = "Result"
+                Row.Parent = SearchResults
+
+                local RowCorner = Instance.new("UICorner")
+                RowCorner.CornerRadius = UDim.new(0, 4)
+                RowCorner.Parent = Row
+
+                local RowLabel = Instance.new("TextLabel")
+                RowLabel.Font = Enum.Font.GothamBold
+                RowLabel.Text = entry.label
+                RowLabel.TextColor3 = Color3.fromRGB(235, 235, 235)
+                RowLabel.TextSize = 12
+                RowLabel.TextXAlignment = Enum.TextXAlignment.Left
+                RowLabel.TextTruncate = Enum.TextTruncate.AtEnd
+                RowLabel.BackgroundTransparency = 1
+                RowLabel.Position = UDim2.new(0, 8, 0, 6)
+                RowLabel.Size = UDim2.new(1, -16, 0, 14)
+                RowLabel.ZIndex = 22
+                RowLabel.Parent = Row
+
+                local RowTab = Instance.new("TextLabel")
+                RowTab.Font = Enum.Font.Gotham
+                RowTab.Text = entry.tab .. (entry.kind and (" • " .. entry.kind) or "")
+                RowTab.TextColor3 = GuiConfig.Color
+                RowTab.TextSize = 10
+                RowTab.TextXAlignment = Enum.TextXAlignment.Left
+                RowTab.BackgroundTransparency = 1
+                RowTab.Position = UDim2.new(0, 8, 0, 22)
+                RowTab.Size = UDim2.new(1, -16, 0, 12)
+                RowTab.ZIndex = 22
+                RowTab.Parent = Row
+
+                local RowButton = Instance.new("TextButton")
+                RowButton.Text = ""
+                RowButton.BackgroundTransparency = 1
+                RowButton.Size = UDim2.new(1, 0, 1, 0)
+                RowButton.ZIndex = 23
+                RowButton.Parent = Row
+
+                RowButton.Activated:Connect(function()
+                    if entry.kind == "Toggle" and entry.element and entry.element.Set then
+                        entry.element.Value = not entry.element.Value
+                        entry.element:Set(entry.element.Value)
+                    else
+                        SearchBox.Text = ""
+                        if entry.switch then entry.switch() end
+                    end
+                end)
+
+                found = found + 1
+                if found >= 15 then break end
+            end
+
+            if found == 0 then
+                local Empty = Instance.new("TextLabel")
+                Empty.Font = Enum.Font.GothamBold
+                Empty.Text = "No results"
+                Empty.TextColor3 = Color3.fromRGB(150, 150, 150)
+                Empty.TextSize = 12
+                Empty.BackgroundTransparency = 1
+                Empty.Size = UDim2.new(1, 0, 0, 40)
+                Empty.ZIndex = 22
+                Empty.Parent = SearchResults
+            end
+        end
+
+        SearchBox:GetPropertyChangedSignal("Text"):Connect(RunSearch)
+        GuiFunc.FocusSearch = function()
+            SearchBox:CaptureFocus()
+        end
+    end
+
     function GuiFunc:DestroyGui()
-        if CoreGui:FindFirstChild("Chloeex") then
-            Chloeex:Destroy()
+        if CoreGui:FindFirstChild("NatUI") then
+            NatUI:Destroy()
         end
     end
 
@@ -910,7 +1016,7 @@ function Chloex:Window(GuiConfig)
         local Dialog = Instance.new("ImageLabel")
         Dialog.Size = UDim2.new(0, 300, 0, 150)
         Dialog.Position = UDim2.new(0.5, -150, 0.5, -75)
-        Dialog.Image = "rbxassetid://107443308956559"
+        Dialog.Image = "rbxassetid://9542022979"
         Dialog.ImageTransparency = 0
         Dialog.BorderSizePixel = 0
         Dialog.ZIndex = 51
@@ -946,7 +1052,7 @@ function Chloex:Window(GuiConfig)
         Title.Position = UDim2.new(0, 0, 0, 4)
         Title.BackgroundTransparency = 1
         Title.Font = Enum.Font.GothamBold
-        Title.Text = "Olympus | Window"
+        Title.Text = "WisHub Window"
         Title.TextSize = 22
         Title.TextColor3 = Color3.fromRGB(255, 255, 255)
         Title.ZIndex = 52
@@ -995,7 +1101,7 @@ function Chloex:Window(GuiConfig)
         Instance.new("UICorner", Cancel).CornerRadius = UDim.new(0, 6)
 
         Yes.MouseButton1Click:Connect(function()
-            if Chloeex then Chloeex:Destroy() end
+            if NatUI then NatUI:Destroy() end
             if game.CoreGui:FindFirstChild("ToggleUIButton") then
                 game.CoreGui.ToggleUIButton:Destroy()
             end
@@ -1006,16 +1112,6 @@ function Chloex:Window(GuiConfig)
         end)
     end)
 
-    local ToggleKey = Enum.KeyCode.G
-    UserInputService.InputBegan:Connect(function(input, gpe)
-        if gpe then return end
-        if input.KeyCode == ToggleKey then
-            if DropShadowHolder then
-                DropShadowHolder.Visible = not DropShadowHolder.Visible
-            end
-        end
-    end)
-
     function GuiFunc:ToggleUI()
         local ScreenGui = Instance.new("ScreenGui")
         ScreenGui.Parent = game:GetService("CoreGui")
@@ -1024,7 +1120,7 @@ function Chloex:Window(GuiConfig)
 
         local MainButton = Instance.new("ImageLabel")
         MainButton.Parent = ScreenGui
-        MainButton.Size = UDim2.new(0, 40, 0, 40)
+        MainButton.Size = UDim2.new(0, 50, 0, 50)
         MainButton.Position = UDim2.new(0, 20, 0, 100)
         MainButton.BackgroundTransparency = 1
         MainButton.Image = "rbxassetid://" .. GuiConfig.Image
@@ -1166,13 +1262,13 @@ function Chloex:Window(GuiConfig)
     UICorner36.CornerRadius = UDim.new(0, 3)
     UICorner36.Parent = DropdownSelect
 
-    UIStroke14.Color = Color3.fromRGB(255, 40, 40)
+    UIStroke14.Color = Color3.fromRGB(12, 159, 255)
     UIStroke14.Thickness = 2.5
     UIStroke14.Transparency = 0.8
     UIStroke14.Parent = DropdownSelect
 
     DropdownSelectReal.AnchorPoint = Vector2.new(0.5, 0.5)
-    DropdownSelectReal.BackgroundColor3 = Color3.fromRGB(255, 40, 40)
+    DropdownSelectReal.BackgroundColor3 = Color3.fromRGB(0, 27, 98)
     DropdownSelectReal.BackgroundTransparency = 0.7
     DropdownSelectReal.BorderColor3 = Color3.fromRGB(0, 0, 0)
     DropdownSelectReal.BorderSizePixel = 0
@@ -1193,7 +1289,6 @@ function Chloex:Window(GuiConfig)
     DropPageLayout.Archivable = false
     DropPageLayout.Name = "DropPageLayout"
     DropPageLayout.Parent = DropdownFolder
-    --// Tabs
     local Tabs = {}
     local CountTab = 0
     local CountDropdown = 0
@@ -1259,7 +1354,7 @@ function Chloex:Window(GuiConfig)
         TabButton.Parent = Tab
 
         TabName.Font = Enum.Font.GothamBold
-        TabName.Text = "| " .. tostring(TabConfig.Name)
+        TabName.Text = "[ " .. tostring(TabConfig.Name) .. " ]"
         TabName.TextColor3 = Color3.fromRGB(255, 255, 255)
         TabName.TextSize = 13
         TabName.TextXAlignment = Enum.TextXAlignment.Left
@@ -1307,8 +1402,7 @@ function Chloex:Window(GuiConfig)
             end
         end
 
-        TabButton.Activated:Connect(function()
-            CircleClick(TabButton, Mouse.X, Mouse.Y)
+        local function switchToTab(force)
             local FrameChoose
             for a, s in ScrollTab:GetChildren() do
                 for i, v in s:GetChildren() do
@@ -1318,7 +1412,7 @@ function Chloex:Window(GuiConfig)
                     end
                 end
             end
-            if FrameChoose ~= nil and Tab.LayoutOrder ~= LayersPageLayout.CurrentPage.LayoutOrder then
+            if FrameChoose ~= nil and (force or Tab.LayoutOrder ~= LayersPageLayout.CurrentPage.LayoutOrder) then
                 for _, TabFrame in ScrollTab:GetChildren() do
                     if TabFrame.Name == "Tab" then
                         TweenService:Create(
@@ -1353,8 +1447,23 @@ function Chloex:Window(GuiConfig)
                     { Size = UDim2.new(0, 1, 0, 12) }
                 ):Play()
             end
+        end
+
+        TabButton.Activated:Connect(function()
+            CircleClick(TabButton, Mouse.X, Mouse.Y)
+            switchToTab(false)
         end)
-        --// Section
+
+        local function SearchSwitch()
+            if SearchResults then
+                SearchResults.Visible = false
+                ScrollTab.Visible = true
+            end
+            switchToTab(true)
+        end
+
+        TabRegistry[TabConfig.Name] = SearchSwitch
+        RegisterSearch({ label = TabConfig.Name, tab = TabConfig.Name, kind = "Tab", switch = SearchSwitch })
         local Sections = {}
         local CountSection = 0
         function Sections:AddSection(Title, AlwaysOpen)
@@ -1465,7 +1574,6 @@ function Chloex:Window(GuiConfig)
             }
             UIGradient.Parent = SectionDecideFrame
 
-            --// Section Add
             local SectionAdd = Instance.new("Frame");
             local UICorner8 = Instance.new("UICorner");
             local UIListLayout2 = Instance.new("UIListLayout");
@@ -1687,6 +1795,7 @@ function Chloex:Window(GuiConfig)
                 end
 
                 CountItem = CountItem + 1
+                RegisterSearch({ label = ParagraphConfig.Title, tab = TabConfig.Name, kind = "Info", switch = SearchSwitch })
                 return ParagraphFunc
             end
 
@@ -1837,7 +1946,7 @@ function Chloex:Window(GuiConfig)
                     InputBox.FocusLost:Connect(function()
                         PanelFunc.Value = InputBox.Text
                         ConfigData[configKey] = InputBox.Text
-                        -- Auto-save disabled - use manual save
+                        SaveConfig()
                     end)
                 end
 
@@ -1906,6 +2015,7 @@ function Chloex:Window(GuiConfig)
                 end
 
                 CountItem = CountItem + 1
+                RegisterSearch({ label = ButtonConfig.Title, tab = TabConfig.Name, kind = "Button", switch = SearchSwitch })
             end
 
             function Items:AddToggle(ToggleConfig)
@@ -2057,7 +2167,7 @@ function Chloex:Window(GuiConfig)
                         if not ok then warn("Toggle Callback error:", err) end
                     end
                     ConfigData[configKey] = Value
-                    -- Auto-save disabled - use manual save
+                    SaveConfig()
                     if Value then
                         TweenService:Create(ToggleTitle, TweenInfo.new(0.2), { TextColor3 = GuiConfig.Color }):Play()
                         TweenService:Create(ToggleCircle, TweenInfo.new(0.2), { Position = UDim2.new(0, 15, 0, 0) })
@@ -2080,6 +2190,7 @@ function Chloex:Window(GuiConfig)
                 ToggleFunc:Set(ToggleFunc.Value)
                 CountItem = CountItem + 1
                 Elements[configKey] = ToggleFunc
+                RegisterSearch({ label = ToggleConfig.Title, tab = TabConfig.Name, kind = "Toggle", element = ToggleFunc, switch = SearchSwitch })
                 return ToggleFunc
             end
 
@@ -2257,7 +2368,7 @@ function Chloex:Window(GuiConfig)
 
                     SliderConfig.Callback(Value)
                     ConfigData[configKey] = Value
-                    -- Auto-save disabled - use manual save
+                    SaveConfig()
                 end
 
                 SliderFrame.InputBegan:Connect(function(Input)
@@ -2312,6 +2423,7 @@ function Chloex:Window(GuiConfig)
                 SliderFunc:Set(SliderConfig.Default)
                 CountItem = CountItem + 1
                 Elements[configKey] = SliderFunc
+                RegisterSearch({ label = SliderConfig.Title, tab = TabConfig.Name, kind = "Slider", element = SliderFunc, switch = SearchSwitch })
                 return SliderFunc
             end
 
@@ -2321,6 +2433,7 @@ function Chloex:Window(GuiConfig)
                 InputConfig.Content = InputConfig.Content or ""
                 InputConfig.Callback = InputConfig.Callback or function() end
                 InputConfig.Default = InputConfig.Default or ""
+                InputConfig.Placeholder = InputConfig.Placeholder or "Input Here"
 
                 local configKey = "Input_" .. InputConfig.Title
                 if ConfigData[configKey] ~= nil then
@@ -2413,7 +2526,7 @@ function Chloex:Window(GuiConfig)
                 InputTextBox.Font = Enum.Font.GothamBold
                 InputTextBox.PlaceholderColor3 = Color3.fromRGB(120.00000044703484, 120.00000044703484,
                     120.00000044703484)
-                InputTextBox.PlaceholderText = "Input Here"
+                InputTextBox.PlaceholderText = InputConfig.Placeholder
                 InputTextBox.Text = InputConfig.Default
                 InputTextBox.TextColor3 = Color3.fromRGB(255, 255, 255)
                 InputTextBox.TextSize = 12
@@ -2432,7 +2545,7 @@ function Chloex:Window(GuiConfig)
                     InputFunc.Value = Value
                     InputConfig.Callback(Value)
                     ConfigData[configKey] = Value
-                    -- Auto-save disabled - use manual save
+                    SaveConfig()
                 end
 
                 InputFunc:Set(InputFunc.Value)
@@ -2442,9 +2555,10 @@ function Chloex:Window(GuiConfig)
                 end)
                 CountItem = CountItem + 1
                 Elements[configKey] = InputFunc
+                RegisterSearch({ label = InputConfig.Title, tab = TabConfig.Name, kind = "Input", element = InputFunc, switch = SearchSwitch })
                 return InputFunc
             end
-            
+
             function Items:AddDropdown(DropdownConfig)
                 local DropdownConfig = DropdownConfig or {}
                 DropdownConfig.Title = DropdownConfig.Title or "Title"
@@ -2698,51 +2812,53 @@ function Chloex:Window(GuiConfig)
                 end
 
                 function DropdownFunc:Set(Value)
-                    if DropdownConfig.Multi then
-                        DropdownFunc.Value = type(Value) == "table" and Value or {}
-                    else
-                        DropdownFunc.Value = (type(Value) == "table" and Value[1]) or Value
-                    end
+                    task.spawn(function()
+                        if DropdownConfig.Multi then
+                            DropdownFunc.Value = type(Value) == "table" and Value or {}
+                        else
+                            DropdownFunc.Value = (type(Value) == "table" and Value[1]) or Value
+                        end
 
-                    ConfigData[configKey] = DropdownFunc.Value
-                    -- Auto-save disabled - use manual save
+                        ConfigData[configKey] = DropdownFunc.Value
+                        SaveConfig()
 
-                    local texts = {}
-                    for _, Drop in ScrollSelect:GetChildren() do
-                        if Drop.Name == "Option" and Drop:FindFirstChild("OptionText") then
-                            local v = Drop:GetAttribute("RealValue")
-                            local selected = DropdownConfig.Multi and table.find(DropdownFunc.Value, v) or
-                                DropdownFunc.Value == v
+                        local texts = {}
+                        for _, Drop in ScrollSelect:GetChildren() do
+                            if Drop.Name == "Option" and Drop:FindFirstChild("OptionText") then
+                                local v = Drop:GetAttribute("RealValue")
+                                local selected = DropdownConfig.Multi and table.find(DropdownFunc.Value, v) or
+                                    DropdownFunc.Value == v
 
-                            if selected then
-                                TweenService:Create(Drop.ChooseFrame, TweenInfo.new(0.2),
-                                    { Size = UDim2.new(0, 1, 0, 12) }):Play()
-                                TweenService:Create(Drop.ChooseFrame.UIStroke, TweenInfo.new(0.2), { Transparency = 0 })
-                                    :Play()
-                                TweenService:Create(Drop, TweenInfo.new(0.2), { BackgroundTransparency = 0.935 }):Play()
-                                table.insert(texts, Drop.OptionText.Text)
-                            else
-                                TweenService:Create(Drop.ChooseFrame, TweenInfo.new(0.1),
-                                    { Size = UDim2.new(0, 0, 0, 0) }):Play()
-                                TweenService:Create(Drop.ChooseFrame.UIStroke, TweenInfo.new(0.1),
-                                    { Transparency = 0.999 }):Play()
-                                TweenService:Create(Drop, TweenInfo.new(0.1), { BackgroundTransparency = 0.999 }):Play()
+                                if selected then
+                                    TweenService:Create(Drop.ChooseFrame, TweenInfo.new(0.2),
+                                        { Size = UDim2.new(0, 1, 0, 12) }):Play()
+                                    TweenService:Create(Drop.ChooseFrame.UIStroke, TweenInfo.new(0.2), { Transparency = 0 })
+                                        :Play()
+                                    TweenService:Create(Drop, TweenInfo.new(0.2), { BackgroundTransparency = 0.935 }):Play()
+                                    table.insert(texts, Drop.OptionText.Text)
+                                else
+                                    TweenService:Create(Drop.ChooseFrame, TweenInfo.new(0.1),
+                                        { Size = UDim2.new(0, 0, 0, 0) }):Play()
+                                    TweenService:Create(Drop.ChooseFrame.UIStroke, TweenInfo.new(0.1),
+                                        { Transparency = 0.999 }):Play()
+                                    TweenService:Create(Drop, TweenInfo.new(0.1), { BackgroundTransparency = 0.999 }):Play()
+                                end
                             end
                         end
-                    end
 
-                    OptionSelecting.Text = (#texts == 0)
-                        and (DropdownConfig.Multi and "Select Options" or "Select Option")
-                        or table.concat(texts, ", ")
+                        OptionSelecting.Text = (#texts == 0)
+                            and (DropdownConfig.Multi and "Select Options" or "Select Option")
+                            or table.concat(texts, ", ")
 
-                    if DropdownConfig.Callback then
-                        if DropdownConfig.Multi then
-                            DropdownConfig.Callback(DropdownFunc.Value)
-                        else
-                            local str = (DropdownFunc.Value ~= nil) and tostring(DropdownFunc.Value) or ""
-                            DropdownConfig.Callback(str)
+                        if DropdownConfig.Callback then
+                            if DropdownConfig.Multi then
+                                DropdownConfig.Callback(DropdownFunc.Value)
+                            else
+                                local str = (DropdownFunc.Value ~= nil) and tostring(DropdownFunc.Value) or ""
+                                DropdownConfig.Callback(str)
+                            end
                         end
-                    end
+                    end)
                 end
 
                 function DropdownFunc:SetValue(val)
@@ -2757,11 +2873,16 @@ function Chloex:Window(GuiConfig)
                     newList = newList or {}
                     selecting = selecting or (DropdownConfig.Multi and {} or nil)
                     DropdownFunc:Clear()
-                    for _, v in ipairs(newList) do
-                        DropdownFunc:AddOption(v)
-                    end
+                    task.spawn(function()
+                        for i, v in ipairs(newList) do
+                            DropdownFunc:AddOption(v)
+                            if i % 20 == 0 then
+                                task.wait()
+                            end
+                        end
+                        DropdownFunc:Set(selecting)
+                    end)
                     DropdownFunc.Options = newList
-                    DropdownFunc:Set(selecting)
                 end
 
                 DropdownFunc:SetValues(DropdownFunc.Options, DropdownFunc.Value)
@@ -2769,7 +2890,191 @@ function Chloex:Window(GuiConfig)
                 CountItem = CountItem + 1
                 CountDropdown = CountDropdown + 1
                 Elements[configKey] = DropdownFunc
+                RegisterSearch({ label = DropdownConfig.Title, tab = TabConfig.Name, kind = "Dropdown", element = DropdownFunc, switch = SearchSwitch })
                 return DropdownFunc
+            end
+
+            function Items:AddBanner(BannerConfig)
+                BannerConfig = BannerConfig or {}
+                local asset = tostring(BannerConfig.Image or BannerConfig.Banner or "")
+                if asset ~= "" and not string.find(asset, "rbxassetid://") then
+                    asset = "rbxassetid://" .. asset
+                end
+
+                local Banner = Instance.new("Frame")
+                Banner.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+                Banner.BackgroundTransparency = 0.2
+                Banner.BorderSizePixel = 0
+                Banner.ClipsDescendants = true
+                Banner.LayoutOrder = CountItem
+                Banner.Size = UDim2.new(1, 0, 0, BannerConfig.Height or 110)
+                Banner.Name = "Banner"
+                Banner.Parent = SectionAdd
+
+                local BannerCorner = Instance.new("UICorner")
+                BannerCorner.CornerRadius = UDim.new(0, 8)
+                BannerCorner.Parent = Banner
+
+                if asset ~= "" then
+                    local Img = Instance.new("ImageLabel")
+                    Img.Image = asset
+                    Img.BackgroundTransparency = 1
+                    Img.ScaleType = Enum.ScaleType.Crop
+                    Img.Size = UDim2.new(1, 0, 1, 0)
+                    Img.Name = "BannerImage"
+                    Img.Parent = Banner
+                else
+                    local Grad = Instance.new("UIGradient")
+                    Grad.Color = ColorSequence.new {
+                        ColorSequenceKeypoint.new(0, Color3.fromRGB(20, 20, 20)),
+                        ColorSequenceKeypoint.new(0.5, GuiConfig.Color),
+                        ColorSequenceKeypoint.new(1, Color3.fromRGB(20, 20, 20))
+                    }
+                    Grad.Rotation = 25
+                    Grad.Parent = Banner
+                end
+
+                if BannerConfig.Version then
+                    local VerPill = Instance.new("Frame")
+                    VerPill.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+                    VerPill.BackgroundTransparency = 0.35
+                    VerPill.BorderSizePixel = 0
+                    VerPill.AnchorPoint = Vector2.new(1, 0)
+                    VerPill.Position = UDim2.new(1, -8, 0, 8)
+                    VerPill.Size = UDim2.new(0, 52, 0, 20)
+                    VerPill.Name = "VersionPill"
+                    VerPill.Parent = Banner
+
+                    local VerCorner = Instance.new("UICorner")
+                    VerCorner.CornerRadius = UDim.new(0, 10)
+                    VerCorner.Parent = VerPill
+
+                    local VerLabel = Instance.new("TextLabel")
+                    VerLabel.Font = Enum.Font.GothamBold
+                    VerLabel.Text = tostring(BannerConfig.Version)
+                    VerLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+                    VerLabel.TextSize = 10
+                    VerLabel.BackgroundTransparency = 1
+                    VerLabel.Size = UDim2.new(1, 0, 1, 0)
+                    VerLabel.Parent = VerPill
+                end
+
+                if BannerConfig.Title then
+                    local TitleLabel = Instance.new("TextLabel")
+                    TitleLabel.Font = Enum.Font.GothamBold
+                    TitleLabel.Text = BannerConfig.Title
+                    TitleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+                    TitleLabel.TextSize = 18
+                    TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
+                    TitleLabel.BackgroundTransparency = 1
+                    TitleLabel.AnchorPoint = Vector2.new(0, 1)
+                    TitleLabel.Position = UDim2.new(0, 12, 1, -12)
+                    TitleLabel.Size = UDim2.new(1, -24, 0, 20)
+                    TitleLabel.Name = "BannerTitle"
+                    TitleLabel.Parent = Banner
+                end
+
+                CountItem = CountItem + 1
+                return Banner
+            end
+
+            function Items:AddCard(CardConfig)
+                CardConfig = CardConfig or {}
+                CardConfig.Title = CardConfig.Title or "Card"
+                CardConfig.Description = CardConfig.Description or ""
+                local btns = CardConfig.Buttons or {}
+                local cardHeight = 70 + (#btns > 0 and 40 or 0)
+
+                local Card = Instance.new("Frame")
+                Card.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+                Card.BackgroundTransparency = 0.935
+                Card.BorderSizePixel = 0
+                Card.LayoutOrder = CountItem
+                Card.Size = UDim2.new(1, 0, 0, cardHeight)
+                Card.Name = "Card"
+                Card.Parent = SectionAdd
+
+                local CardCorner = Instance.new("UICorner")
+                CardCorner.CornerRadius = UDim.new(0, 6)
+                CardCorner.Parent = Card
+
+                local cx = 12
+                if CardConfig.Logo and CardConfig.Logo ~= "" then
+                    local logo = tostring(CardConfig.Logo)
+                    if not string.find(logo, "rbxassetid://") then logo = "rbxassetid://" .. logo end
+                    local Logo = Instance.new("ImageLabel")
+                    Logo.Image = logo
+                    Logo.BackgroundTransparency = 1
+                    Logo.ScaleType = Enum.ScaleType.Fit
+                    Logo.Position = UDim2.new(0, 12, 0, 14)
+                    Logo.Size = UDim2.new(0, 32, 0, 32)
+                    Logo.Parent = Card
+                    cx = 52
+                end
+
+                local CardTitle = Instance.new("TextLabel")
+                CardTitle.Font = Enum.Font.GothamBold
+                CardTitle.Text = CardConfig.Title
+                CardTitle.TextColor3 = Color3.fromRGB(235, 235, 235)
+                CardTitle.TextSize = 13
+                CardTitle.TextXAlignment = Enum.TextXAlignment.Left
+                CardTitle.BackgroundTransparency = 1
+                CardTitle.Position = UDim2.new(0, cx, 0, 12)
+                CardTitle.Size = UDim2.new(1, -cx - 12, 0, 16)
+                CardTitle.Parent = Card
+
+                local CardDesc = Instance.new("TextLabel")
+                CardDesc.Font = Enum.Font.Gotham
+                CardDesc.Text = CardConfig.Description
+                CardDesc.TextColor3 = Color3.fromRGB(180, 180, 180)
+                CardDesc.TextSize = 11
+                CardDesc.TextXAlignment = Enum.TextXAlignment.Left
+                CardDesc.TextYAlignment = Enum.TextYAlignment.Top
+                CardDesc.TextWrapped = true
+                CardDesc.BackgroundTransparency = 1
+                CardDesc.Position = UDim2.new(0, cx, 0, 30)
+                CardDesc.Size = UDim2.new(1, -cx - 12, 0, 28)
+                CardDesc.Parent = Card
+
+                if #btns > 0 then
+                    local Row = Instance.new("Frame")
+                    Row.BackgroundTransparency = 1
+                    Row.Position = UDim2.new(0, 8, 0, cardHeight - 38)
+                    Row.Size = UDim2.new(1, -16, 0, 30)
+                    Row.Parent = Card
+
+                    local RowLayout = Instance.new("UIListLayout")
+                    RowLayout.FillDirection = Enum.FillDirection.Horizontal
+                    RowLayout.Padding = UDim.new(0, 6)
+                    RowLayout.Parent = Row
+
+                    local bw = (#btns == 1) and UDim2.new(1, 0, 1, 0) or UDim2.new(0.5, -3, 1, 0)
+                    for _, bd in ipairs(btns) do
+                        local Btn = Instance.new("TextButton")
+                        Btn.Font = Enum.Font.GothamBold
+                        Btn.Text = bd.Name or "Button"
+                        Btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+                        Btn.TextSize = 11
+                        Btn.TextTransparency = 0.2
+                        Btn.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+                        Btn.BackgroundTransparency = 0.9
+                        Btn.BorderSizePixel = 0
+                        Btn.Size = bw
+                        Btn.Parent = Row
+
+                        local BtnCorner = Instance.new("UICorner")
+                        BtnCorner.CornerRadius = UDim.new(0, 6)
+                        BtnCorner.Parent = Btn
+
+                        if bd.Callback then
+                            Btn.MouseButton1Click:Connect(bd.Callback)
+                        end
+                    end
+                end
+
+                RegisterSearch({ label = CardConfig.Title, tab = TabConfig.Name, kind = "Card", switch = SearchSwitch })
+                CountItem = CountItem + 1
+                return Card
             end
 
             function Items:AddDivider()
@@ -2825,150 +3130,13 @@ function Chloex:Window(GuiConfig)
                 Label.Size = UDim2.new(1, -20, 1, 0)
                 Label.BackgroundTransparency = 1
                 Label.Font = Enum.Font.GothamBold
-                Label.Text = "Ã¢â€â‚¬Ã¢â€â‚¬ " .. title .. " Ã¢â€â‚¬Ã¢â€â‚¬"
+                Label.Text = "──> " .. title .. " <──"
                 Label.TextColor3 = Color3.fromRGB(230, 230, 230)
                 Label.TextSize = 12
                 Label.TextXAlignment = Enum.TextXAlignment.Left
 
                 CountItem = CountItem + 1
                 return SubSection
-            end
-
-            function Items:AddConfigPanel()
-                local selectedConfigName = CurrentConfigName or ""
-
-                -- Status Paragraph
-                local StatusParagraph = Items:AddParagraph({
-                    Title = "Config Manager",
-                    Content = "Current: " .. (CurrentConfigName or "None") .. " | Autoload: " .. (GetAutoload() or "None"),
-                    Icon = "settings"
-                })
-
-                -- Config Name Input
-                local ConfigNameInput = Items:AddInput({
-                    Title = "Config Name",
-                    Content = "Enter the name for your config",
-                    Placeholder = "e.g., Default, PVP, Farming",
-                    Default = CurrentConfigName or "",
-                    Callback = function(value)
-                        selectedConfigName = value
-                    end
-                })
-
-                -- Config List Dropdown
-                local configs = GetConfigList()
-                local ConfigDropdown = Items:AddDropdown({
-                    Title = "Select Config",
-                    Content = "Choose from existing configs",
-                    Options = configs,
-                    Default = nil,
-                    Callback = function(selected)
-                        selectedConfigName = selected
-                        ConfigNameInput:Set(selected)
-                    end
-                })
-
-                -- Save & Load Buttons
-                Items:AddButton({
-                    Title = "Save Config",
-                    SubTitle = "Load Config",
-                    Callback = function()
-                        if selectedConfigName ~= "" then
-                            if SaveConfigAs(selectedConfigName) then
-                                chloex("Config saved: " .. selectedConfigName, 3, Color3.fromRGB(100, 255, 100))
-                                -- Refresh dropdown
-                                local newConfigs = GetConfigList()
-                                ConfigDropdown:SetValues(newConfigs, selectedConfigName)
-                                StatusParagraph:SetContent("Current: " .. selectedConfigName .. " | Autoload: " .. (GetAutoload() or "None"))
-                            end
-                        else
-                            chloex("Please enter a config name", 3, Color3.fromRGB(255, 100, 100))
-                        end
-                    end,
-                    SubCallback = function()
-                        if selectedConfigName ~= "" then
-                            if LoadConfig(selectedConfigName) then
-                                chloex("Config loaded: " .. selectedConfigName, 3, Color3.fromRGB(100, 255, 100))
-                                StatusParagraph:SetContent("Current: " .. selectedConfigName .. " | Autoload: " .. (GetAutoload() or "None"))
-                            else
-                                chloex("Failed to load: " .. selectedConfigName, 3, Color3.fromRGB(255, 100, 100))
-                            end
-                        else
-                            chloex("Please select a config", 3, Color3.fromRGB(255, 100, 100))
-                        end
-                    end
-                })
-
-                -- Delete Config & Set Autoload
-                Items:AddButton({
-                    Title = "Delete Config",
-                    SubTitle = "Set Autoload",
-                    Callback = function()
-                        if selectedConfigName ~= "" then
-                            -- Confirm before delete
-                            chloex("Click again to confirm delete: " .. selectedConfigName, 4, Color3.fromRGB(255, 150, 100))
-                            task.wait(0.5)
-
-                            if DeleteConfig(selectedConfigName) then
-                                chloex("Config deleted: " .. selectedConfigName, 3, Color3.fromRGB(255, 100, 100))
-                                selectedConfigName = ""
-                                ConfigNameInput:Set("")
-
-                                -- Refresh dropdown
-                                local newConfigs = GetConfigList()
-                                ConfigDropdown:SetValues(newConfigs, nil)
-                                StatusParagraph:SetContent("Current: " .. (CurrentConfigName or "None") .. " | Autoload: " .. (GetAutoload() or "None"))
-                            end
-                        else
-                            chloex("Please select a config to delete", 3, Color3.fromRGB(255, 100, 100))
-                        end
-                    end,
-                    SubCallback = function()
-                        if selectedConfigName ~= "" then
-                            SetAutoload(selectedConfigName)
-                            chloex("Autoload set to: " .. selectedConfigName, 3, Color3.fromRGB(100, 200, 255))
-                            StatusParagraph:SetContent("Current: " .. (CurrentConfigName or "None") .. " | Autoload: " .. selectedConfigName)
-                        else
-                            chloex("Please enter a config name", 3, Color3.fromRGB(255, 100, 100))
-                        end
-                    end
-                })
-
-                -- Refresh & Clear Autoload
-                Items:AddButton({
-                    Title = "Refresh List",
-                    SubTitle = "Clear Autoload",
-                    Callback = function()
-                        local newConfigs = GetConfigList()
-                        ConfigDropdown:SetValues(newConfigs, nil)
-                        chloex("Config list refreshed (" .. #newConfigs .. " configs)", 2, Color3.fromRGB(150, 150, 255))
-                    end,
-                    SubCallback = function()
-                        ClearAutoload()
-                        chloex("Autoload cleared", 3, Color3.fromRGB(200, 200, 100))
-                        StatusParagraph:SetContent("Current: " .. (CurrentConfigName or "None") .. " | Autoload: None")
-                    end
-                })
-
-                -- Reset Elements Button
-                Items:AddButton({
-                    Title = "Reset All Elements to Default",
-                    Callback = function()
-                        ResetElements()
-                        chloex("All elements reset to default values", 3, Color3.fromRGB(255, 200, 100))
-                    end
-                })
-
-                -- Return functions for external manipulation
-                return {
-                    UpdateStatus = function()
-                        StatusParagraph:SetContent("Current: " .. (CurrentConfigName or "None") .. " | Autoload: " .. (GetAutoload() or "None"))
-                    end,
-                    RefreshList = function()
-                        local newConfigs = GetConfigList()
-                        ConfigDropdown:SetValues(newConfigs, nil)
-                    end
-                }
             end
 
             CountSection = CountSection + 1
@@ -2979,6 +3147,73 @@ function Chloex:Window(GuiConfig)
         local safeName = TabConfig.Name:gsub("%s+", "_")
         _G[safeName] = Sections
         return Sections
+    end
+
+    function Tabs:InfoTab(InfoConfig)
+        InfoConfig = InfoConfig or {}
+        local Sections = Tabs:AddTab({
+            Name = InfoConfig.Name or "Info",
+            Icon = InfoConfig.Icon or "idea",
+        })
+        local Items = Sections:AddSection(InfoConfig.SectionTitle or "Information", true)
+
+        if InfoConfig.Banner and InfoConfig.Banner ~= "" then
+            Items:AddBanner({
+                Image = InfoConfig.Banner,
+                Title = InfoConfig.Title,
+                Version = InfoConfig.Version,
+                Height = InfoConfig.BannerHeight,
+            })
+        end
+
+        if InfoConfig.DiscordLink then
+            Items:AddCard({
+                Title = InfoConfig.DiscordName or "Community",
+                Description = InfoConfig.DiscordText or "Support, updates and announcements.",
+                Logo = Icons.discord,
+                Buttons = {
+                    {
+                        Name = "Copy Invite",
+                        Callback = function()
+                            if setclipboard then
+                                setclipboard(InfoConfig.DiscordLink)
+                                than("Discord invite copied", 4, GuiConfig.Color, "WisHub", "Community")
+                            end
+                        end,
+                    },
+                },
+            })
+        end
+
+        for _, card in ipairs(InfoConfig.Cards or {}) do
+            Items:AddCard(card)
+        end
+
+        return Sections, Items
+    end
+
+    GuiFunc.InfoTab = function(_, cfg) return Tabs:InfoTab(cfg) end
+    Tabs.Window = GuiFunc
+    Tabs.ExportConfig = function() return GuiFunc:ExportConfig() end
+    Tabs.ImportConfig = function(_, str) return GuiFunc:ImportConfig(str) end
+
+    if GuiConfig.Search then
+        UserInputService.InputBegan:Connect(function(input, gpe)
+            if gpe then return end
+            local ctrl = UserInputService:IsKeyDown(Enum.KeyCode.LeftControl)
+                or UserInputService:IsKeyDown(Enum.KeyCode.RightControl)
+                or UserInputService:IsKeyDown(Enum.KeyCode.LeftMeta)
+                or UserInputService:IsKeyDown(Enum.KeyCode.RightMeta)
+            local shift = UserInputService:IsKeyDown(Enum.KeyCode.LeftShift)
+                or UserInputService:IsKeyDown(Enum.KeyCode.RightShift)
+            if ctrl and shift and input.KeyCode == Enum.KeyCode.F then
+                if DropShadowHolder then DropShadowHolder.Visible = true end
+                if GuiFunc.FocusSearch then GuiFunc.FocusSearch() end
+            elseif ctrl and input.KeyCode == Enum.KeyCode.O then
+                if DropShadowHolder then DropShadowHolder.Visible = true end
+                if GuiFunc.FocusSearch then GuiFunc.FocusSearch() end
+            end
+        end)
     end
 
     return Tabs
