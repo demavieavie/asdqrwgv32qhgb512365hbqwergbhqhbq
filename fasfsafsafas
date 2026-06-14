@@ -12,131 +12,44 @@ gameName         = gameName:gsub("[^%w_ ]", "")
 gameName         = gameName:gsub("%s+", "_")
 
 local ConfigFile = "WisHub/Config/" .. gameName .. ".json"
-local ConfigFolder = "WisHub/Configs"
-local GameConfigFolder = ConfigFolder .. "/" .. gameName
 
 ConfigData       = {}
 Elements         = {}
 CURRENT_VERSION  = nil
-ActiveConfigName = nil
-ActiveConfigPath = nil
-ActiveConfigMode = nil
-AutoSaveEnabled = false
-ApplyingConfig = false
-SaveQueued = false
 
-local InternalConfigKeys = {
-    ["Input_Config Name"] = true,
-    ["Dropdown_Saved Configs"] = true,
-    ["Toggle_Auto Load"] = true,
-}
-
-local function CopyConfigValue(value, seen)
-    if type(value) ~= "table" then return value end
-    seen = seen or {}
-    if seen[value] then return seen[value] end
-
-    local copy = {}
-    seen[value] = copy
-    for k, v in pairs(value) do
-        copy[CopyConfigValue(k, seen)] = CopyConfigValue(v, seen)
+function SaveConfig()
+    if writefile then
+        ConfigData._version = CURRENT_VERSION
+        writefile(ConfigFile, HttpService:JSONEncode(ConfigData))
     end
-    return copy
-end
-
-function GetConfigSnapshot()
-    local snapshot = {}
-
-    for key, value in pairs(ConfigData or {}) do
-        if key ~= "_version" and not InternalConfigKeys[key] then
-            snapshot[key] = CopyConfigValue(value)
-        end
-    end
-
-    for key, element in pairs(Elements or {}) do
-        if element and element.Value ~= nil then
-            snapshot[key] = CopyConfigValue(element.Value)
-        end
-    end
-
-    snapshot._version = CURRENT_VERSION
-    return snapshot
-end
-
-function SetActiveConfig(name, path, autoSave, mode)
-    ActiveConfigName = name
-    ActiveConfigPath = path
-    if mode ~= nil then
-        ActiveConfigMode = mode
-    elseif name == nil then
-        ActiveConfigMode = nil
-    end
-    if autoSave ~= nil then
-        AutoSaveEnabled = autoSave
-    end
-end
-
-function SaveConfig(force)
-    if not writefile or not CURRENT_VERSION then return false end
-    if ApplyingConfig and not force then return false end
-    if not force and not AutoSaveEnabled then return false end
-
-    local target = ActiveConfigPath or ConfigFile
-    if not target or target == "" then return false end
-
-    ConfigData = GetConfigSnapshot()
-    writefile(target, HttpService:JSONEncode(ConfigData))
-    return true
-end
-
-function QueueSaveConfig(force)
-    if force then return SaveConfig(true) end
-    if ApplyingConfig or not AutoSaveEnabled then return false end
-    if SaveQueued then return true end
-
-    SaveQueued = true
-    task.delay(0.35, function()
-        SaveQueued = false
-        SaveConfig(false)
-    end)
-    return true
 end
 
 function LoadConfigFromFile()
     if not CURRENT_VERSION then return end
-    ConfigData = { _version = CURRENT_VERSION }
-    SetActiveConfig(nil, nil, false, nil)
-
-    local autoPath = GameConfigFolder .. "/_autoload.json"
-    if not (isfile and isfile(autoPath)) then return end
-
-    local ok, auto = pcall(function()
-        return HttpService:JSONDecode(readfile(autoPath))
-    end)
-    local autoName = ok and type(auto) == "table" and tostring(auto.Name or "") or ""
-    if autoName == "" then return end
-
-    local configPath = GameConfigFolder .. "/" .. autoName .. ".json"
-    if isfile and isfile(configPath) then
+    if isfile and isfile(ConfigFile) then
         local success, result = pcall(function()
-            return HttpService:JSONDecode(readfile(configPath))
+            return HttpService:JSONDecode(readfile(ConfigFile))
         end)
         if success and type(result) == "table" then
-            ConfigData = result
-            ConfigData._version = CURRENT_VERSION
-            SetActiveConfig(autoName, configPath, true, "autoload")
+            if result._version == CURRENT_VERSION then
+                ConfigData = result
+            else
+                ConfigData = { _version = CURRENT_VERSION }
+            end
+        else
+            ConfigData = { _version = CURRENT_VERSION }
         end
+    else
+        ConfigData = { _version = CURRENT_VERSION }
     end
 end
 
 function LoadConfigElements()
-    ApplyingConfig = true
     for key, element in pairs(Elements) do
         if ConfigData[key] ~= nil and element.Set then
             element:Set(ConfigData[key], true)
         end
     end
-    ApplyingConfig = false
 end
 
 local Icons = {
@@ -598,63 +511,8 @@ function Chloex:Window(GuiConfig)
         table.insert(SearchRegistry, entry)
     end
 
-    local function ExtractConfigPayload(payload)
-        local data = payload
-        if type(payload.Data) == "table" then
-            data = payload.Data
-        elseif type(payload.Config) == "table" then
-            data = payload.Config
-        elseif type(payload.Settings) == "table" then
-            data = payload.Settings
-        end
-
-        if type(data) ~= "table" then return nil end
-
-        local cleaned = {}
-        for key, value in pairs(data) do
-            if key ~= "_version"
-                and key ~= "Game"
-                and key ~= "Version"
-                and key ~= "PlaceId"
-                and key ~= "Hub"
-                and key ~= "SavedAt"
-                and key ~= "ActiveConfig"
-                and key ~= "AutoLoad"
-                and not InternalConfigKeys[key] then
-                cleaned[key] = value
-            end
-        end
-
-        return cleaned
-    end
-
-    local function ApplyConfigData(data)
-        ApplyingConfig = true
-        ConfigData = { _version = CURRENT_VERSION }
-
-        for key, value in pairs(data) do
-            ConfigData[key] = value
-            if Elements[key] and Elements[key].Set then
-                pcall(function()
-                    Elements[key]:Set(value, true)
-                end)
-            end
-        end
-
-        ConfigData._version = CURRENT_VERSION
-        ApplyingConfig = false
-    end
-
     function GuiFunc:ExportConfig()
-        local payload = HttpService:JSONEncode({
-            Hub = "WisHub",
-            Game = gameName,
-            PlaceId = game.PlaceId,
-            Version = CURRENT_VERSION,
-            ActiveConfig = ActiveConfigName or "",
-            AutoLoad = GuiFunc:GetAutoLoad(),
-            Data = GetConfigSnapshot(),
-        })
+        local payload = HttpService:JSONEncode({ Game = gameName, Version = CURRENT_VERSION, Data = ConfigData })
         if setclipboard then
             setclipboard(payload)
             than("Config copied to clipboard", 4, GuiConfig.Color, "WisHub", "Export")
@@ -672,14 +530,15 @@ function Chloex:Window(GuiConfig)
             than("Invalid config format", 4, Color3.fromRGB(255, 90, 90), "WisHub", "Import")
             return false
         end
-        local data = ExtractConfigPayload(dec)
-        if not data then
-            than("Config data is empty", 4, Color3.fromRGB(255, 90, 90), "WisHub", "Import")
-            return false
+        local data = dec.Data or dec
+        for key, value in pairs(data) do
+            ConfigData[key] = value
+            if Elements[key] and Elements[key].Set then
+                pcall(function() Elements[key]:Set(value, true) end)
+            end
         end
-
-        ApplyConfigData(data)
-        QueueSaveConfig(AutoSaveEnabled)
+        ConfigData._version = CURRENT_VERSION
+        SaveConfig()
         than("Config imported", 4, GuiConfig.Color, "WisHub", "Import")
         return true
     end
@@ -713,9 +572,10 @@ function Chloex:Window(GuiConfig)
         end
         if not writefile then return false end
         EnsureConfigFolder()
-        local path = GameConfigFolder .. "/" .. name .. ".json"
-        writefile(path, HttpService:JSONEncode(GetConfigSnapshot()))
-        SetActiveConfig(name, path, AutoSaveEnabled or GuiFunc:GetAutoLoad() == name, "saved")
+        local snapshot = {}
+        for k, v in pairs(ConfigData) do snapshot[k] = v end
+        snapshot._version = CURRENT_VERSION
+        writefile(GameConfigFolder .. "/" .. name .. ".json", HttpService:JSONEncode(snapshot))
         than("Saved '" .. name .. "'", 4, GuiConfig.Color, "WisHub", "Config")
         return true
     end
@@ -732,14 +592,16 @@ function Chloex:Window(GuiConfig)
             than("Failed to read config", 4, Color3.fromRGB(255, 90, 90), "WisHub", "Config")
             return false
         end
-        local data = ExtractConfigPayload(dec)
-        if not data then
-            than("Config data is empty", 4, Color3.fromRGB(255, 90, 90), "WisHub", "Config")
-            return false
+        for key, value in pairs(dec) do
+            if key ~= "_version" then
+                ConfigData[key] = value
+                if Elements[key] and Elements[key].Set then
+                    pcall(function() Elements[key]:Set(value, true) end)
+                end
+            end
         end
-
-        ApplyConfigData(data)
-        SetActiveConfig(name, path, true, "manual")
+        ConfigData._version = CURRENT_VERSION
+        SaveConfig()
         than("Loaded '" .. name .. "'", 4, GuiConfig.Color, "WisHub", "Config")
         return true
     end
@@ -748,12 +610,6 @@ function Chloex:Window(GuiConfig)
         local path = GameConfigFolder .. "/" .. name .. ".json"
         if isfile and isfile(path) and delfile then
             delfile(path)
-            if ActiveConfigName == name then
-                SetActiveConfig(nil, nil, false, nil)
-            end
-            if GuiFunc:GetAutoLoad() == name then
-                GuiFunc:SetAutoLoad("")
-            end
             than("Deleted '" .. name .. "'", 4, Color3.fromRGB(255, 170, 0), "WisHub", "Config")
             return true
         end
@@ -763,14 +619,7 @@ function Chloex:Window(GuiConfig)
     function GuiFunc:SetAutoLoad(name)
         if not writefile then return end
         EnsureConfigFolder()
-        name = name or ""
-        writefile(GameConfigFolder .. "/_autoload.json", HttpService:JSONEncode({ Name = name }))
-
-        if name ~= "" then
-            SetActiveConfig(name, GameConfigFolder .. "/" .. name .. ".json", true, "autoload")
-        elseif ActiveConfigMode == "autoload" then
-            SetActiveConfig(nil, nil, false, nil)
-        end
+        writefile(GameConfigFolder .. "/_autoload.json", HttpService:JSONEncode({ Name = name or "" }))
     end
 
     function GuiFunc:GetAutoLoad()
@@ -1291,16 +1140,7 @@ function Chloex:Window(GuiConfig)
             end
         end
 
-        local searchTicket = 0
-        SearchBox:GetPropertyChangedSignal("Text"):Connect(function()
-            searchTicket = searchTicket + 1
-            local ticket = searchTicket
-            task.delay(0.08, function()
-                if ticket == searchTicket then
-                    RunSearch()
-                end
-            end)
-        end)
+        SearchBox:GetPropertyChangedSignal("Text"):Connect(RunSearch)
         GuiFunc.FocusSearch = function()
             SearchBox:CaptureFocus()
         end
@@ -2125,8 +1965,7 @@ function Chloex:Window(GuiConfig)
                     function() end
 
                 local configKey = "Panel_" .. PanelConfig.Title
-                local shouldSave = PanelConfig.Save ~= false
-                if shouldSave and ConfigData[configKey] ~= nil then
+                if ConfigData[configKey] ~= nil then
                     PanelConfig.Default = ConfigData[configKey]
                 end
 
@@ -2258,31 +2097,17 @@ function Chloex:Window(GuiConfig)
 
                 if InputBox then
                     InputBox.FocusLost:Connect(function()
-                        PanelFunc:Set(InputBox.Text)
+                        PanelFunc.Value = InputBox.Text
+                        ConfigData[configKey] = InputBox.Text
+                        SaveConfig()
                     end)
-                end
-
-                function PanelFunc:Set(Value, noSave)
-                    Value = tostring(Value or "")
-                    PanelFunc.Value = Value
-                    if shouldSave then
-                        ConfigData[configKey] = Value
-                    end
-                    if InputBox then
-                        InputBox.Text = Value
-                    end
-                    if shouldSave and not noSave then QueueSaveConfig() end
                 end
 
                 function PanelFunc:GetInput()
                     return InputBox and InputBox.Text or ""
                 end
 
-                PanelFunc:Set(PanelFunc.Value, true)
                 CountItem = CountItem + 1
-                if shouldSave then
-                    Elements[configKey] = PanelFunc
-                end
                 return PanelFunc
             end
 
@@ -2355,8 +2180,7 @@ function Chloex:Window(GuiConfig)
                 ToggleConfig.Callback = ToggleConfig.Callback or function() end
 
                 local configKey = "Toggle_" .. ToggleConfig.Title
-                local shouldSave = ToggleConfig.Save ~= false
-                if shouldSave and ConfigData[configKey] ~= nil then
+                if ConfigData[configKey] ~= nil then
                     ToggleConfig.Default = ConfigData[configKey]
                 end
 
@@ -2488,19 +2312,15 @@ function Chloex:Window(GuiConfig)
                     ToggleFunc:Set(ToggleFunc.Value)
                 end)
 
-                function ToggleFunc:Set(Value, noSave)
-                    Value = Value and true or false
-                    ToggleFunc.Value = Value
+                function ToggleFunc:Set(Value)
                     if typeof(ToggleConfig.Callback) == "function" then
                         local ok, err = pcall(function()
                             ToggleConfig.Callback(Value)
                         end)
                         if not ok then warn("Toggle Callback error:", err) end
                     end
-                    if shouldSave then
-                        ConfigData[configKey] = Value
-                        if not noSave then QueueSaveConfig() end
-                    end
+                    ConfigData[configKey] = Value
+                    SaveConfig()
                     if Value then
                         TweenService:Create(ToggleTitle, TweenInfo.new(0.2), { TextColor3 = GuiConfig.Color }):Play()
                         TweenService:Create(ToggleCircle, TweenInfo.new(0.2), { Position = UDim2.new(0, 15, 0, 0) })
@@ -2520,11 +2340,9 @@ function Chloex:Window(GuiConfig)
                     end
                 end
 
-                ToggleFunc:Set(ToggleFunc.Value, true)
+                ToggleFunc:Set(ToggleFunc.Value)
                 CountItem = CountItem + 1
-                if shouldSave then
-                    Elements[configKey] = ToggleFunc
-                end
+                Elements[configKey] = ToggleFunc
                 RegisterSearch({ label = ToggleConfig.Title, tab = TabConfig.Name, kind = "Toggle", element = ToggleFunc, switch = SearchSwitch })
                 return ToggleFunc
             end
@@ -2533,26 +2351,15 @@ function Chloex:Window(GuiConfig)
                 local SliderConfig = SliderConfig or {}
                 SliderConfig.Title = SliderConfig.Title or "Slider"
                 SliderConfig.Content = SliderConfig.Content or ""
-                SliderConfig.Min = tonumber(SliderConfig.Min) or 0
-                SliderConfig.Max = tonumber(SliderConfig.Max) or 100
-                if SliderConfig.Max < SliderConfig.Min then
-                    SliderConfig.Min, SliderConfig.Max = SliderConfig.Max, SliderConfig.Min
-                end
-                SliderConfig.Default = tonumber(SliderConfig.Default) or SliderConfig.Min
-                SliderConfig.Increment = tonumber(SliderConfig.Increment or SliderConfig.Step) or 1
-                local sliderSpan = SliderConfig.Max - SliderConfig.Min
-                if SliderConfig.Increment <= 0 then
-                    SliderConfig.Increment = sliderSpan >= 1 and 1 or (sliderSpan > 0 and math.max(sliderSpan / 100, 0.01) or 1)
-                elseif sliderSpan > 0 and SliderConfig.Increment >= sliderSpan then
-                    SliderConfig.Increment = sliderSpan >= 1 and 1 or math.max(sliderSpan / 100, 0.01)
-                end
-                SliderConfig.Live = SliderConfig.Live == true
+                SliderConfig.Increment = SliderConfig.Increment or 1
+                SliderConfig.Min = SliderConfig.Min or 0
+                SliderConfig.Max = SliderConfig.Max or 100
+                SliderConfig.Default = SliderConfig.Default or 50
                 SliderConfig.Callback = SliderConfig.Callback or function() end
 
                 local configKey = "Slider_" .. SliderConfig.Title
-                local shouldSave = SliderConfig.Save ~= false
-                if shouldSave and ConfigData[configKey] ~= nil then
-                    SliderConfig.Default = tonumber(ConfigData[configKey]) or SliderConfig.Default
+                if ConfigData[configKey] ~= nil then
+                    SliderConfig.Default = ConfigData[configKey]
                 end
 
                 local SliderFunc = { Value = SliderConfig.Default }
@@ -2597,7 +2404,7 @@ function Chloex:Window(GuiConfig)
                 SliderTitle.BorderColor3 = Color3.fromRGB(0, 0, 0)
                 SliderTitle.BorderSizePixel = 0
                 SliderTitle.Position = UDim2.new(0, 10, 0, 10)
-                SliderTitle.Size = UDim2.new(1, -230, 0, 13)
+                SliderTitle.Size = UDim2.new(1, -180, 0, 13)
                 SliderTitle.Name = "SliderTitle"
                 SliderTitle.Parent = Slider
 
@@ -2613,18 +2420,18 @@ function Chloex:Window(GuiConfig)
                 SliderContent.BorderColor3 = Color3.fromRGB(0, 0, 0)
                 SliderContent.BorderSizePixel = 0
                 SliderContent.Position = UDim2.new(0, 10, 0, 25)
-                SliderContent.Size = UDim2.new(1, -230, 0, 12)
+                SliderContent.Size = UDim2.new(1, -180, 0, 12)
                 SliderContent.Name = "SliderContent"
                 SliderContent.Parent = Slider
 
-                SliderContent.Size = UDim2.new(1, -230, 0,
+                SliderContent.Size = UDim2.new(1, -180, 0,
                     12 + (12 * (SliderContent.TextBounds.X // SliderContent.AbsoluteSize.X)))
                 SliderContent.TextWrapped = true
                 Slider.Size = UDim2.new(1, 0, 0, SliderContent.AbsoluteSize.Y + 33)
 
                 SliderContent:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
                     SliderContent.TextWrapped = false
-                    SliderContent.Size = UDim2.new(1, -230, 0,
+                    SliderContent.Size = UDim2.new(1, -180, 0,
                         12 + (12 * (SliderContent.TextBounds.X // SliderContent.AbsoluteSize.X)))
                     Slider.Size = UDim2.new(1, 0, 0, SliderContent.AbsoluteSize.Y + 33)
                     SliderContent.TextWrapped = true
@@ -2636,8 +2443,8 @@ function Chloex:Window(GuiConfig)
                 SliderInput.BorderColor3 = Color3.fromRGB(0, 0, 0)
                 SliderInput.BackgroundTransparency = 1
                 SliderInput.BorderSizePixel = 0
-                SliderInput.Position = UDim2.new(1, -200, 0.5, 0)
-                SliderInput.Size = UDim2.new(0, 44, 0, 20)
+                SliderInput.Position = UDim2.new(1, -155, 0.5, 0)
+                SliderInput.Size = UDim2.new(0, 28, 0, 20)
                 SliderInput.Name = "SliderInput"
                 SliderInput.Parent = Slider
 
@@ -2663,7 +2470,7 @@ function Chloex:Window(GuiConfig)
                 SliderFrame.BorderColor3 = Color3.fromRGB(0, 0, 0)
                 SliderFrame.BorderSizePixel = 0
                 SliderFrame.Position = UDim2.new(1, -20, 0.5, 0)
-                SliderFrame.Size = UDim2.new(0, 140, 0, 3)
+                SliderFrame.Size = UDim2.new(0, 100, 0, 3)
                 SliderFrame.Name = "SliderFrame"
                 SliderFrame.Parent = Slider
 
@@ -2695,64 +2502,33 @@ function Chloex:Window(GuiConfig)
                 UIStroke6.Parent = SliderCircle
 
                 local Dragging = false
-                local UpdatingText = false
-
+                -- Hitung jumlah desimal dari Increment (mis. 0.1 -> 1, 0.01 -> 2, 1 -> 0)
+                local function CountDecimals(n)
+                    local s = string.format("%.10f", n):gsub("0+$", ""):gsub("%.$", "")
+                    local dot = s:find("%.")
+                    return dot and (#s - dot) or 0
+                end
+                local Decimals = CountDecimals(SliderConfig.Increment)
                 local function Round(Number, Factor)
-                    if sliderSpan <= 0 then return SliderConfig.Min end
-                    local Steps = math.floor(((Number - SliderConfig.Min) / Factor) + 0.5)
-                    return SliderConfig.Min + (Steps * Factor)
+                    -- Bulatkan ke kelipatan Factor terdekat
+                    local Result = math.floor(Number / Factor + 0.5) * Factor
+                    -- Bersihkan galat floating-point (mis. 0.30000000004 -> 0.3)
+                    local mult = 10 ^ Decimals
+                    return math.floor(Result * mult + 0.5) / mult
                 end
-
-                local function FormatValue(Value)
-                    if math.abs(Value - math.floor(Value)) < 0.000001 then
-                        return tostring(math.floor(Value))
-                    end
-                    local text = string.format("%.4f", Value)
-                    text = text:gsub("0+$", ""):gsub("%.$", "")
-                    return text
-                end
-
-                local function ValueScale(Value)
-                    if sliderSpan <= 0 then return 0 end
-                    return math.clamp((Value - SliderConfig.Min) / sliderSpan, 0, 1)
-                end
-
-                local function ApplySliderValue(Value, noSave, instant, fireCallback)
-                    Value = tonumber(Value) or SliderConfig.Min
+                function SliderFunc:Set(Value)
                     Value = math.clamp(Round(Value, SliderConfig.Increment), SliderConfig.Min, SliderConfig.Max)
-
                     SliderFunc.Value = Value
-                    if shouldSave then
-                        ConfigData[configKey] = Value
-                    end
+                    TextBox.Text = string.format("%." .. Decimals .. "f", Value)
+                    TweenService:Create(
+                        SliderDraggable,
+                        TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+                        { Size = UDim2.fromScale((Value - SliderConfig.Min) / (SliderConfig.Max - SliderConfig.Min), 1) }
+                    ):Play()
 
-                    UpdatingText = true
-                    TextBox.Text = FormatValue(Value)
-                    UpdatingText = false
-
-                    local targetSize = UDim2.fromScale(ValueScale(Value), 1)
-                    if instant then
-                        SliderDraggable.Size = targetSize
-                    else
-                        TweenService:Create(
-                            SliderDraggable,
-                            TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-                            { Size = targetSize }
-                        ):Play()
-                    end
-
-                    if fireCallback then
-                        local ok, err = pcall(function()
-                            SliderConfig.Callback(Value)
-                        end)
-                        if not ok then warn("Slider Callback error:", err) end
-                    end
-
-                    if shouldSave and not noSave then QueueSaveConfig() end
-                end
-
-                function SliderFunc:Set(Value, noSave)
-                    ApplySliderValue(Value, noSave, false, true)
+                    SliderConfig.Callback(Value)
+                    ConfigData[configKey] = Value
+                    SaveConfig()
                 end
 
                 SliderFrame.InputBegan:Connect(function(Input)
@@ -2768,25 +2544,21 @@ function Chloex:Window(GuiConfig)
                             0,
                             1
                         )
-                        ApplySliderValue(SliderConfig.Min + (sliderSpan * SizeScale), true, true, SliderConfig.Live)
+                        SliderFunc:Set(SliderConfig.Min + ((SliderConfig.Max - SliderConfig.Min) * SizeScale))
                     end
                 end)
 
-                local function FinishSliderDrag(Input)
+                SliderFrame.InputEnded:Connect(function(Input)
                     if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
-                        if not Dragging then return end
                         Dragging = false
-                        ApplySliderValue(SliderFunc.Value, false, false, not SliderConfig.Live)
+                        SliderConfig.Callback(SliderFunc.Value)
                         TweenService:Create(
                             SliderCircle,
                             TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
                             { Size = UDim2.new(0, 8, 0, 8) }
                         ):Play()
                     end
-                end
-
-                SliderFrame.InputEnded:Connect(FinishSliderDrag)
-                UserInputService.InputEnded:Connect(FinishSliderDrag)
+                end)
 
                 UserInputService.InputChanged:Connect(function(Input)
                     if Dragging and (Input.UserInputType == Enum.UserInputType.MouseMovement or Input.UserInputType == Enum.UserInputType.Touch) then
@@ -2795,25 +2567,23 @@ function Chloex:Window(GuiConfig)
                             0,
                             1
                         )
-                        ApplySliderValue(SliderConfig.Min + (sliderSpan * SizeScale), true, true, SliderConfig.Live)
+                        SliderFunc:Set(SliderConfig.Min + ((SliderConfig.Max - SliderConfig.Min) * SizeScale))
                     end
                 end)
 
                 TextBox.FocusLost:Connect(function()
-                    if UpdatingText then return end
-                    local raw = TextBox.Text:gsub(",", ".")
-                    local number = tonumber(raw)
-                    if number then
-                        SliderFunc:Set(number)
+                    -- Izinkan angka desimal: pertahankan digit dan satu titik desimal
+                    local Valid = TextBox.Text:gsub("[^%d%.]", "")
+                    local ValidNumber = tonumber(Valid)
+                    if ValidNumber then
+                        SliderFunc:Set(math.clamp(ValidNumber, SliderConfig.Min, SliderConfig.Max))
                     else
-                        TextBox.Text = FormatValue(SliderFunc.Value)
+                        SliderFunc:Set(SliderConfig.Min)
                     end
                 end)
-                SliderFunc:Set(SliderConfig.Default, true)
+                SliderFunc:Set(SliderConfig.Default)
                 CountItem = CountItem + 1
-                if shouldSave then
-                    Elements[configKey] = SliderFunc
-                end
+                Elements[configKey] = SliderFunc
                 RegisterSearch({ label = SliderConfig.Title, tab = TabConfig.Name, kind = "Slider", element = SliderFunc, switch = SearchSwitch })
                 return SliderFunc
             end
@@ -2827,8 +2597,7 @@ function Chloex:Window(GuiConfig)
                 InputConfig.Placeholder = InputConfig.Placeholder or "Input Here"
 
                 local configKey = "Input_" .. InputConfig.Title
-                local shouldSave = InputConfig.Save ~= false
-                if shouldSave and ConfigData[configKey] ~= nil then
+                if ConfigData[configKey] ~= nil then
                     InputConfig.Default = ConfigData[configKey]
                 end
 
@@ -2932,26 +2701,21 @@ function Chloex:Window(GuiConfig)
                 InputTextBox.Size = UDim2.new(1, -10, 1, -8)
                 InputTextBox.Name = "InputTextBox"
                 InputTextBox.Parent = InputFrame
-                function InputFunc:Set(Value, noSave)
-                    Value = tostring(Value or "")
+                function InputFunc:Set(Value)
                     InputTextBox.Text = Value
                     InputFunc.Value = Value
                     InputConfig.Callback(Value)
-                    if shouldSave then
-                        ConfigData[configKey] = Value
-                        if not noSave then QueueSaveConfig() end
-                    end
+                    ConfigData[configKey] = Value
+                    SaveConfig()
                 end
 
-                InputFunc:Set(InputFunc.Value, true)
+                InputFunc:Set(InputFunc.Value)
 
                 InputTextBox.FocusLost:Connect(function()
                     InputFunc:Set(InputTextBox.Text)
                 end)
                 CountItem = CountItem + 1
-                if shouldSave then
-                    Elements[configKey] = InputFunc
-                end
+                Elements[configKey] = InputFunc
                 RegisterSearch({ label = InputConfig.Title, tab = TabConfig.Name, kind = "Input", element = InputFunc, switch = SearchSwitch })
                 return InputFunc
             end
@@ -2966,8 +2730,7 @@ function Chloex:Window(GuiConfig)
                 DropdownConfig.Callback = DropdownConfig.Callback or function() end
 
                 local configKey = "Dropdown_" .. DropdownConfig.Title
-                local shouldSave = DropdownConfig.Save ~= false
-                if shouldSave and ConfigData[configKey] ~= nil then
+                if ConfigData[configKey] ~= nil then
                     DropdownConfig.Default = ConfigData[configKey]
                 end
 
@@ -3107,8 +2870,7 @@ function Chloex:Window(GuiConfig)
                     ScrollSelect.CanvasSize = UDim2.new(0, 0, 0, UIListLayout4.AbsoluteContentSize.Y)
                 end)
 
-                local dropdownSearchTicket = 0
-                local function RunDropdownSearch()
+                SearchBox:GetPropertyChangedSignal("Text"):Connect(function()
                     local query = string.lower(SearchBox.Text)
                     for _, option in pairs(ScrollSelect:GetChildren()) do
                         if option.Name == "Option" and option:FindFirstChild("OptionText") then
@@ -3117,16 +2879,6 @@ function Chloex:Window(GuiConfig)
                         end
                     end
                     ScrollSelect.CanvasSize = UDim2.new(0, 0, 0, UIListLayout4.AbsoluteContentSize.Y)
-                end
-
-                SearchBox:GetPropertyChangedSignal("Text"):Connect(function()
-                    dropdownSearchTicket = dropdownSearchTicket + 1
-                    local ticket = dropdownSearchTicket
-                    task.delay(0.08, function()
-                        if ticket == dropdownSearchTicket then
-                            RunDropdownSearch()
-                        end
-                    end)
                 end)
 
                 local DropCount = 0
@@ -3220,7 +2972,7 @@ function Chloex:Window(GuiConfig)
                     end)
                 end
 
-                function DropdownFunc:Set(Value, noSave)
+                function DropdownFunc:Set(Value)
                     task.spawn(function()
                         if DropdownConfig.Multi then
                             DropdownFunc.Value = type(Value) == "table" and Value or {}
@@ -3228,10 +2980,8 @@ function Chloex:Window(GuiConfig)
                             DropdownFunc.Value = (type(Value) == "table" and Value[1]) or Value
                         end
 
-                        if shouldSave then
-                            ConfigData[configKey] = DropdownFunc.Value
-                            if not noSave then QueueSaveConfig() end
-                        end
+                        ConfigData[configKey] = DropdownFunc.Value
+                        SaveConfig()
 
                         local texts = {}
                         for _, Drop in ScrollSelect:GetChildren() do
@@ -3280,7 +3030,7 @@ function Chloex:Window(GuiConfig)
                     return self.Value
                 end
 
-                function DropdownFunc:SetValues(newList, selecting, noSave)
+                function DropdownFunc:SetValues(newList, selecting)
                     newList = newList or {}
                     selecting = selecting or (DropdownConfig.Multi and {} or nil)
                     DropdownFunc:Clear()
@@ -3291,18 +3041,16 @@ function Chloex:Window(GuiConfig)
                                 task.wait()
                             end
                         end
-                        DropdownFunc:Set(selecting, noSave)
+                        DropdownFunc:Set(selecting)
                     end)
                     DropdownFunc.Options = newList
                 end
 
-                DropdownFunc:SetValues(DropdownFunc.Options, DropdownFunc.Value, true)
+                DropdownFunc:SetValues(DropdownFunc.Options, DropdownFunc.Value)
 
                 CountItem = CountItem + 1
                 CountDropdown = CountDropdown + 1
-                if shouldSave then
-                    Elements[configKey] = DropdownFunc
-                end
+                Elements[configKey] = DropdownFunc
                 RegisterSearch({ label = DropdownConfig.Title, tab = TabConfig.Name, kind = "Dropdown", element = DropdownFunc, switch = SearchSwitch })
                 return DropdownFunc
             end
@@ -3310,16 +3058,13 @@ function Chloex:Window(GuiConfig)
             function Items:AddConfig(ConfigCfg)
                 ConfigCfg = ConfigCfg or {}
 
-                local autoName = GuiFunc:GetAutoLoad()
                 local currentName = ""
-                local importJson = ""
-                local selectedConfig = autoName ~= "" and autoName or nil
+                local selectedConfig = nil
 
                 local NameInput = Items:AddInput({
                     Title       = "Config Name",
                     Content     = "Name for saving",
                     Placeholder = "MyConfig",
-                    Save        = false,
                     Callback    = function(text) currentName = text end,
                 })
 
@@ -3327,7 +3072,7 @@ function Chloex:Window(GuiConfig)
                 local function RefreshList()
                     local list = GuiFunc:GetConfigs()
                     if ConfigList and ConfigList.SetValues then
-                        ConfigList:SetValues(list, selectedConfig, true)
+                        ConfigList:SetValues(list, selectedConfig)
                     end
                 end
 
@@ -3336,11 +3081,7 @@ function Chloex:Window(GuiConfig)
                     Content  = "Select a config",
                     Multi    = false,
                     Options  = GuiFunc:GetConfigs(),
-                    Default  = selectedConfig,
-                    Save     = false,
-                    Callback = function(choice)
-                        selectedConfig = choice ~= "" and choice or nil
-                    end,
+                    Callback = function(choice) selectedConfig = choice end,
                 })
 
                 Items:AddButton({
@@ -3372,57 +3113,30 @@ function Chloex:Window(GuiConfig)
                     end,
                 })
 
-                local AutoToggle
-                local initializingAutoToggle = true
-                AutoToggle = Items:AddToggle({
+                local autoName = GuiFunc:GetAutoLoad()
+                Items:AddToggle({
                     Title    = "Auto Load",
                     Content  = autoName ~= "" and ("Auto: " .. autoName) or "Load selected on startup",
                     Default  = autoName ~= "",
-                    Save     = false,
                     Callback = function(value)
-                        if initializingAutoToggle then return end
                         if value and selectedConfig then
                             GuiFunc:SetAutoLoad(selectedConfig)
                             than("Auto load set to '" .. selectedConfig .. "'", 4, GuiConfig.Color, "WisHub", "Config")
-                        elseif value then
-                            GuiFunc:SetAutoLoad("")
-                            if AutoToggle then AutoToggle:Set(false, true) end
-                            than("Select a config first", 4, Color3.fromRGB(255, 170, 0), "WisHub", "Config")
                         else
                             GuiFunc:SetAutoLoad("")
-                        end
-                    end,
-                })
-                initializingAutoToggle = false
-
-                local ImportInput = Items:AddInput({
-                    Title       = "Import JSON",
-                    Content     = "Paste exported config",
-                    Placeholder = "{...}",
-                    Save        = false,
-                    Callback    = function(text) importJson = text end,
-                })
-
-                Items:AddButton({
-                    Title    = "Import JSON",
-                    SubTitle = "Import from Clipboard",
-                    Callback = function()
-                        if GuiFunc:ImportConfig(importJson) then
-                            RefreshList()
-                        end
-                    end,
-                    SubCallback = function()
-                        local clip = (getclipboard and getclipboard()) or ""
-                        if GuiFunc:ImportConfig(clip) then
-                            RefreshList()
                         end
                     end,
                 })
 
                 Items:AddButton({
                     Title    = "Export to Clipboard",
+                    SubTitle = "Import from Clipboard",
                     Callback = function()
                         GuiFunc:ExportConfig()
+                    end,
+                    SubCallback = function()
+                        local clip = (getclipboard and getclipboard()) or ""
+                        GuiFunc:ImportConfig(clip)
                     end,
                 })
 
