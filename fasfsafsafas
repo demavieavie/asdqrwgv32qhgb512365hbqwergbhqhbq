@@ -1,10 +1,10 @@
 local HttpService = game:GetService("HttpService")
 
-if not isfolder("WisHub") then
-    makefolder("WisHub")
+if not isfolder("Wisnu") then
+    makefolder("Wisnu")
 end
-if not isfolder("WisHub/Config") then
-    makefolder("WisHub/Config")
+if not isfolder("Wisnu/Config") then
+    makefolder("Wisnu/Config")
 end
 
 local gameName   = tostring(game:GetService("MarketplaceService"):GetProductInfo(game.PlaceId).Name)
