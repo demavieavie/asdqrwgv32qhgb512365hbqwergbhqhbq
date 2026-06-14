@@ -3312,6 +3312,7 @@ function Chloex:Window(GuiConfig)
 
                 local autoName = GuiFunc:GetAutoLoad()
                 local currentName = ""
+                local importJson = ""
                 local selectedConfig = autoName ~= "" and autoName or nil
 
                 local NameInput = Items:AddInput({
@@ -3394,17 +3395,34 @@ function Chloex:Window(GuiConfig)
                 })
                 initializingAutoToggle = false
 
+                local ImportInput = Items:AddInput({
+                    Title       = "Import JSON",
+                    Content     = "Paste exported config",
+                    Placeholder = "{...}",
+                    Save        = false,
+                    Callback    = function(text) importJson = text end,
+                })
+
                 Items:AddButton({
-                    Title    = "Export to Clipboard",
+                    Title    = "Import JSON",
                     SubTitle = "Import from Clipboard",
                     Callback = function()
-                        GuiFunc:ExportConfig()
+                        if GuiFunc:ImportConfig(importJson) then
+                            RefreshList()
+                        end
                     end,
                     SubCallback = function()
                         local clip = (getclipboard and getclipboard()) or ""
                         if GuiFunc:ImportConfig(clip) then
                             RefreshList()
                         end
+                    end,
+                })
+
+                Items:AddButton({
+                    Title    = "Export to Clipboard",
+                    Callback = function()
+                        GuiFunc:ExportConfig()
                     end,
                 })
 
