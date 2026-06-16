@@ -1,0 +1,88 @@
+local HttpService = game:GetService("HttpService")
+local gameName   = tostring(game:GetService("MarketplaceService"):GetProductInfo(game.PlaceId).Name)
+gameName         = gameName:gsub("[^%w_ ]", "")
+gameName         = gameName:gsub("%s+", "_")
+local ConfigRoot = "WisHUB_UI_Settings"
+local ConfigFolder = ConfigRoot .. "/Configs"
+local GameConfigFolder = ConfigFolder .. "/" .. gameName
+local AutoLoadFile = GameConfigFolder .. "/_autoload.json"
+ConfigData       = {}
+Elements         = {}
+CURRENT_VERSION  = nil
+local function EnsureFolder(path)
+    if isfolder and makefolder and not isfolder(path) then
+        makefolder(path)
+    end
+end
+local function EnsureConfigFolder()
+    EnsureFolder(ConfigRoot)
+    EnsureFolder(ConfigFolder)
+    EnsureFolder(GameConfigFolder)
+end
+local function CleanFileName(name)
+    name = tostring(name or "")
+    name = name:gsub("^%s+", ""):gsub("%s+$", "")
+    name = name:gsub("[^%w_%- ]", "_")
+    name = name:gsub("%s+", "_")
+    return name
+end
+local function GetConfigPath(name)
+    return GameConfigFolder .. "/" .. CleanFileName(name) .. ".json"
+end
+local function ShouldUseConfig(cfg)
+    return cfg.NoConfig ~= true and cfg.Config ~= false
+end
+function SaveConfig(path)
+    if path and writefile then
+        EnsureConfigFolder()
+        ConfigData._version = CURRENT_VERSION
+        local ok = pcall(function()
+            writefile(path, HttpService:JSONEncode(ConfigData))
+        end)
+        return ok
+    end
+    return false
+end
+function LoadConfigFromFile()
+    if not CURRENT_VERSION then return end
+    ConfigData = { _version = CURRENT_VERSION }
+end
+function LoadConfigElements()
+    for key, element in pairs(Elements) do
+        if ConfigData[key] ~= nil and element.Set then
+            element:Set(ConfigData[key], true)
+        end
+    end
+end
+local Icons = {
+    player    = "rbxassetid://12120698352",
+    web       = "rbxassetid://137601480983962",
+    bag       = "rbxassetid://8601111810",
+    shop      = "rbxassetid://4985385964",
+    cart      = "rbxassetid://128874923961846",
+    plug      = "rbxassetid://137601480983962",
+    settings  = "rbxassetid://70386228443175",
+    loop      = "rbxassetid://122032243989747",
+    gps       = "rbxassetid://17824309485",
+    compas    = "rbxassetid://125300760963399",
+    gamepad   = "rbxassetid://84173963561612",
+    boss      = "rbxassetid://13132186360",
+    scroll    = "rbxassetid://114127804740858",
+    menu      = "rbxassetid://6340513838",
+    crosshair = "rbxassetid://12614416478",
+    user      = "rbxassetid://108483430622128",
+    stat      = "rbxassetid://12094445329",
+    eyes      = "rbxassetid://14321059114",
+    sword     = "rbxassetid://82472368671405",
+    discord   = "rbxassetid://94434236999817",
+    star      = "rbxassetid://107005941750079",
+    skeleton  = "rbxassetid://17313330026",
+    payment   = "rbxassetid://18747025078",
+    scan      = "rbxassetid://109869955247116",
+    alert     = "rbxassetid://73186275216515",
+    question  = "rbxassetid://17510196486",
+    idea      = "rbxassetid://16833255748",
+    strom     = "rbxassetid://13321880293",
+    water     = "rbxassetid://100076212630732",
+    dcs       = "rbxassetid://15310731934",
+    start     = "rbxassetid://108886429866687",
