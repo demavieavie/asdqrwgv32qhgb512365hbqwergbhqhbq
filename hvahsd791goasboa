@@ -663,7 +663,7 @@ function Chloex:Window(GuiConfig)
     local UICorner6 = Instance.new("UICorner");
     local NameTab = Instance.new("TextLabel");
     local LayersReal = Instance.new("Frame");
-    local LayersFolder = Instance.new("Folder");
+    local LayersFolder = Instance.new("Frame");
     local LayersPageLayout = Instance.new("UIPageLayout");
 
     NatUI.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
@@ -931,6 +931,9 @@ function Chloex:Window(GuiConfig)
     LayersReal.Name = "LayersReal"
     LayersReal.Parent = Layers
 
+    LayersFolder.BackgroundTransparency = 1
+    LayersFolder.BorderSizePixel = 0
+    LayersFolder.Size = UDim2.new(1, 0, 1, 0)
     LayersFolder.Name = "LayersFolder"
     LayersFolder.Parent = LayersReal
 
@@ -966,14 +969,9 @@ function Chloex:Window(GuiConfig)
     UIListLayout.Parent = ScrollTab
 
     local function UpdateSize1()
-        local OffsetY = 0
-        for _, child in ScrollTab:GetChildren() do
-            if child.Name ~= "UIListLayout" then
-                OffsetY = OffsetY + 3 + child.Size.Y.Offset
-            end
-        end
-        ScrollTab.CanvasSize = UDim2.new(0, 0, 0, OffsetY)
+        ScrollTab.CanvasSize = UDim2.new(0, 0, 0, UIListLayout.AbsoluteContentSize.Y + 6)
     end
+    UIListLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(UpdateSize1)
     ScrollTab.ChildAdded:Connect(UpdateSize1)
     ScrollTab.ChildRemoved:Connect(UpdateSize1)
 
@@ -1427,13 +1425,13 @@ function Chloex:Window(GuiConfig)
     UICorner36.CornerRadius = UDim.new(0, 3)
     UICorner36.Parent = DropdownSelect
 
-    UIStroke14.Color = Color3.fromRGB(12, 159, 255)
+    UIStroke14.Color = Color3.fromRGB(183, 0, 226)
     UIStroke14.Thickness = 2.5
     UIStroke14.Transparency = 0.8
     UIStroke14.Parent = DropdownSelect
 
     DropdownSelectReal.AnchorPoint = Vector2.new(0.5, 0.5)
-    DropdownSelectReal.BackgroundColor3 = Color3.fromRGB(0, 27, 98)
+    DropdownSelectReal.BackgroundColor3 = Color3.fromRGB(183, 0, 226)
     DropdownSelectReal.BackgroundTransparency = 0.7
     DropdownSelectReal.BorderColor3 = Color3.fromRGB(0, 0, 0)
     DropdownSelectReal.BorderSizePixel = 0
@@ -2326,6 +2324,7 @@ function Chloex:Window(GuiConfig)
                 end)
 
                 function ToggleFunc:Set(Value)
+                    ToggleFunc.Value = Value
                     if typeof(ToggleConfig.Callback) == "function" then
                         local ok, err = pcall(function()
                             ToggleConfig.Callback(Value)
@@ -2729,10 +2728,17 @@ function Chloex:Window(GuiConfig)
                     end
                 end
 
+                function InputFunc:Get()
+                    return InputTextBox.Text
+                end
+
                 InputFunc:Set(InputFunc.Value)
 
                 InputTextBox.FocusLost:Connect(function()
                     InputFunc:Set(InputTextBox.Text)
+                end)
+                InputTextBox:GetPropertyChangedSignal("Text"):Connect(function()
+                    InputFunc.Value = InputTextBox.Text
                 end)
                 CountItem = CountItem + 1
                 if configKey then
@@ -3129,6 +3135,15 @@ function Chloex:Window(GuiConfig)
                     end
                 end
 
+                -- Read the name the user actually typed, live from the textbox.
+                -- Relying on the input's FocusLost callback is unreliable in some
+                -- executors (clicking the Save button may not fire it first).
+                local function ResolveName()
+                    local live = (NameInput and NameInput.Get and NameInput:Get()) or currentName or ""
+                    if live ~= "" then currentName = live end
+                    return live
+                end
+
                 ConfigList = Items:AddDropdown({
                     Title    = "Saved Configs",
                     Content  = "Select a config",
@@ -3147,30 +3162,26 @@ function Chloex:Window(GuiConfig)
                     end,
                 })
 
+                local function DoSave()
+                    -- Prefer the name typed in the box; fall back to the selected config.
+                    local targetName = ResolveName()
+                    if targetName == "" then targetName = selectedConfig or "" end
+                    local ok, savedName = GuiFunc:SaveConfigAs(targetName)
+                    if ok then
+                        selectedConfig = savedName or targetName
+                        if NameInput and NameInput.Set then
+                            NameInput:Set(selectedConfig)
+                        end
+                        RefreshList()
+                    end
+                    return ok
+                end
+
                 Items:AddButton({
                     Title    = "Save",
-                    SubTitle = "Save As Auto Load",
-                    Callback = function()
-                        local targetName = selectedConfig or currentName
-                        local ok, savedName = GuiFunc:SaveConfigAs(targetName)
-                        if ok then
-                            selectedConfig = savedName or targetName
-                            if NameInput and NameInput.Set then
-                                NameInput:Set(selectedConfig)
-                            end
-                            RefreshList()
-                        end
-                    end,
-                    SubCallback = function()
-                        local ok, savedName = GuiFunc:SaveConfigAs(currentName)
-                        if ok then
-                            selectedConfig = savedName or currentName
-                            if NameInput and NameInput.Set then
-                                NameInput:Set(selectedConfig)
-                            end
-                            RefreshList()
-                        end
-                    end,
+                    SubTitle = "Save As",
+                    Callback = DoSave,
+                    SubCallback = DoSave,
                 })
 
                 Items:AddButton({
@@ -3196,15 +3207,31 @@ function Chloex:Window(GuiConfig)
                     NoConfig = true,
                     Callback = function(value)
                         if not autoToggleReady then return end
-                        if value and selectedConfig then
-                            GuiFunc:SetAutoLoad(selectedConfig, true)
-                            than("Auto load set to '" .. selectedConfig .. "'", 4, GuiConfig.Color, "WisHub", "Config")
-                        elseif value then
-                            GuiFunc:SetAutoLoad("", false)
-                            than("Select a saved config first", 4, Color3.fromRGB(255, 170, 0), "WisHub", "Config")
-                            if AutoLoadToggle then
-                                task.defer(function() AutoLoadToggle:Set(false) end)
+                        if value then
+                            -- Resolve the target: a selected config, or the name typed in the box.
+                            local name = selectedConfig
+                            if not name or name == "" then name = ResolveName() end
+                            if not name or name == "" then
+                                GuiFunc:SetAutoLoad("", false)
+                                than("Enter a config name first", 4, Color3.fromRGB(255, 170, 0), "WisHub", "Config")
+                                if AutoLoadToggle then
+                                    task.defer(function() AutoLoadToggle:Set(false) end)
+                                end
+                                return
                             end
+                            -- Make sure the config file exists before pointing autoload at it.
+                            if not (isfile and isfile(GetConfigPath(name))) then
+                                if not GuiFunc:SaveConfigAs(name) then
+                                    if AutoLoadToggle then
+                                        task.defer(function() AutoLoadToggle:Set(false) end)
+                                    end
+                                    return
+                                end
+                                RefreshList()
+                            end
+                            selectedConfig = name
+                            GuiFunc:SetAutoLoad(name, true)
+                            than("Auto load set to '" .. name .. "'", 4, GuiConfig.Color, "WisHub", "Config")
                         else
                             GuiFunc:SetAutoLoad("", false)
                         end
