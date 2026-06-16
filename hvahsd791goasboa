@@ -3149,7 +3149,7 @@ function Chloex:Window(GuiConfig)
 
                 Items:AddButton({
                     Title    = "Save",
-                    SubTitle = "Save As",
+                    SubTitle = "Save As Auto Load",
                     Callback = function()
                         local targetName = selectedConfig or currentName
                         local ok, savedName = GuiFunc:SaveConfigAs(targetName)
