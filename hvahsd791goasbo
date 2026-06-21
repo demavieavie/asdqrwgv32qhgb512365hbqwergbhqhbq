@@ -253,7 +253,10 @@ local function GetExecutorEnvironment()
     return _G
 end
 
-local function KickWishHubLocked()
+local function KickWishHubLocked(reason)
+    local env = GetExecutorEnvironment()
+    env.__WishHubLastKickReason = tostring(reason or "Unknown")
+    warn("[WisHUB Protection] Kick:", env.__WishHubLastKickReason)
     pcall(function()
         if LocalPlayer then
             LocalPlayer:Kick(WISHUB_KICK_MESSAGE)
@@ -367,15 +370,8 @@ local function IsForeignUiCandidate(child, strictUiLock)
         "httplogger",
         "hydroxide",
         "darkdex",
-        "spy",
-        "logger",
-        "remote",
-        "remotes",
-        "remoteevent",
-        "remotefunction",
         "requestspy",
         "requestlogger",
-        "httplog",
         "hookspy",
         "cobalt",
         "remotelogger",
@@ -397,15 +393,8 @@ local function IsForeignUiCandidate(child, strictUiLock)
         "httplogger",
         "hydroxide",
         "darkdex",
-        "spy",
-        "logger",
-        "remote",
-        "remotes",
-        "remoteevent",
-        "remotefunction",
         "requestspy",
         "requestlogger",
-        "httplog",
         "hookspy",
         "cobalt",
         "remotelogger",
@@ -521,12 +510,21 @@ local function StartWishHubProtection(guiConfig)
     local env = GetExecutorEnvironment()
     local strictUiLock = guiConfig and guiConfig.StrictUILock == true
     if env[WISHUB_LOCK_KEY] or CoreGui:FindFirstChild(WISHUB_GUI_NAME) or CoreGui:FindFirstChild(WISHUB_TOGGLE_GUI_NAME) then
-        KickWishHubLocked()
-        return false
+        ReleaseWishHubProtection()
+        for _, guiName in ipairs({ WISHUB_GUI_NAME, WISHUB_TOGGLE_GUI_NAME, WISHUB_NOTIFY_GUI_NAME }) do
+            local oldGui = CoreGui:FindFirstChild(guiName)
+            if oldGui then
+                pcall(function()
+                    oldGui:Destroy()
+                end)
+            end
+        end
+        task.wait()
     end
 
-    if FindUnsafeEnvironmentMarker() then
-        KickWishHubLocked()
+    local unsafeMarker = FindUnsafeEnvironmentMarker()
+    if unsafeMarker then
+        KickWishHubLocked("Environment marker: " .. tostring(unsafeMarker))
         return false
     end
 
@@ -546,8 +544,9 @@ local function StartWishHubProtection(guiConfig)
     local security = { Connections = connections, AllowedInstances = {} }
     env[WISHUB_SECURITY_KEY] = security
 
-    if ScanCoreGuiForForeignUi(strictUiLock) then
-        KickWishHubLocked()
+    local existingForeignUi = ScanCoreGuiForForeignUi(strictUiLock)
+    if existingForeignUi then
+        KickWishHubLocked("Existing CoreGui: " .. tostring(existingForeignUi:GetFullName()))
         ReleaseWishHubProtection()
         return false
     end
@@ -560,7 +559,7 @@ local function StartWishHubProtection(guiConfig)
                     return
                 end
                 if IsForeignUiCandidate(child, strictUiLock) then
-                    KickWishHubLocked()
+                    KickWishHubLocked("CoreGui added: " .. tostring(child:GetFullName()))
                     return
                 end
                 task.wait(0.25)
@@ -570,12 +569,14 @@ local function StartWishHubProtection(guiConfig)
 
     task.spawn(function()
         while env[WISHUB_LOCK_KEY] do
-            if FindUnsafeEnvironmentMarker() then
-                KickWishHubLocked()
+            local loopMarker = FindUnsafeEnvironmentMarker()
+            if loopMarker then
+                KickWishHubLocked("Environment marker loop: " .. tostring(loopMarker))
                 break
             end
-            if ScanCoreGuiForForeignUi(strictUiLock) then
-                KickWishHubLocked()
+            local foreignUi = ScanCoreGuiForForeignUi(strictUiLock)
+            if foreignUi then
+                KickWishHubLocked("CoreGui scan loop: " .. tostring(foreignUi:GetFullName()))
                 break
             end
             task.wait(0.5)
@@ -2945,10 +2946,12 @@ function Chloex:Window(GuiConfig)
                 function ToggleFunc:Set(Value)
                     ToggleFunc.Value = Value
                     if typeof(ToggleConfig.Callback) == "function" then
-                        local ok, err = pcall(function()
-                            ToggleConfig.Callback(Value)
+                        task.spawn(function()
+                            local ok, err = pcall(function()
+                                ToggleConfig.Callback(Value)
+                            end)
+                            if not ok then warn("Toggle Callback error:", err) end
                         end)
-                        if not ok then warn("Toggle Callback error:", err) end
                     end
                     if configKey then
                         ConfigData[configKey] = Value
