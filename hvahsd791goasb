@@ -309,6 +309,35 @@ local function AllowWishHubInstance(instance)
     end
 end
 
+local function IsWishHubAllowedInstance(instance, security)
+    if not instance then
+        return false
+    end
+
+    if instance.Name == "RobloxGui" then
+        return true
+    end
+
+    if type(security) == "table" and type(security.AllowedInstances) == "table" then
+        if security.AllowedInstances[instance] then
+            return true
+        end
+    end
+
+    return false
+end
+
+local function ScanCoreGuiForForeignUi(strictUiLock)
+    local security = GetExecutorEnvironment()[WISHUB_SECURITY_KEY]
+    for _, child in ipairs(CoreGui:GetChildren()) do
+        if child:IsA("ScreenGui") and not IsWishHubAllowedInstance(child, security) then
+            if IsForeignUiCandidate(child, strictUiLock) then
+                return child
+            end
+        end
+    end
+end
+
 local function StartWishHubProtection(guiConfig)
     local env = GetExecutorEnvironment()
     local strictUiLock = guiConfig and guiConfig.StrictUILock == true
@@ -338,6 +367,12 @@ local function StartWishHubProtection(guiConfig)
     local security = { Connections = connections, AllowedInstances = {} }
     env[WISHUB_SECURITY_KEY] = security
 
+    if ScanCoreGuiForForeignUi(strictUiLock) then
+        KickWishHubLocked()
+        ReleaseWishHubProtection()
+        return false
+    end
+
     connections[#connections + 1] = CoreGui.ChildAdded:Connect(function(child)
         task.defer(function()
             for _ = 1, 6 do
@@ -361,7 +396,11 @@ local function StartWishHubProtection(guiConfig)
                 KickWishHubLocked()
                 break
             end
-            task.wait(1)
+            if ScanCoreGuiForForeignUi(strictUiLock) then
+                KickWishHubLocked()
+                break
+            end
+            task.wait(0.5)
         end
     end)
 
