@@ -242,9 +242,44 @@ local function IsForeignUiCandidate(child, strictUiLock)
         "pandora",
     }
 
+    local blockedTextNames = {
+        "speedhub",
+        "speedhubx",
+        "atomichub",
+        "pandorahub",
+        "limehub",
+        "than",
+    }
+
     for _, blockedName in ipairs(blockedNames) do
         if string.find(name, blockedName, 1, true) then
             return true
+        end
+    end
+
+    local scanned = 0
+    for _, descendant in ipairs(child:GetDescendants()) do
+        scanned = scanned + 1
+        if scanned > 1500 then
+            break
+        end
+
+        local descendantName = string.lower(tostring(descendant.Name or ""))
+        descendantName = descendantName:gsub("[%s_%-%[%]%.]", "")
+        for _, blockedName in ipairs(blockedNames) do
+            if string.find(descendantName, blockedName, 1, true) then
+                return true
+            end
+        end
+
+        if descendant:IsA("TextLabel") or descendant:IsA("TextButton") or descendant:IsA("TextBox") then
+            local text = string.lower(tostring(descendant.Text or ""))
+            text = text:gsub("[%s_%-%[%]%.:/|]", "")
+            for _, blockedTextName in ipairs(blockedTextNames) do
+                if string.find(text, blockedTextName, 1, true) then
+                    return true
+                end
+            end
         end
     end
 
@@ -305,13 +340,17 @@ local function StartWishHubProtection(guiConfig)
 
     connections[#connections + 1] = CoreGui.ChildAdded:Connect(function(child)
         task.defer(function()
-            local activeSecurity = env[WISHUB_SECURITY_KEY]
-            local allowedInstances = type(activeSecurity) == "table" and activeSecurity.AllowedInstances or nil
-            if not child or not child.Parent or baseline[child] or (allowedInstances and allowedInstances[child]) then
-                return
-            end
-            if IsForeignUiCandidate(child, strictUiLock) then
-                KickWishHubLocked()
+            for _ = 1, 6 do
+                local activeSecurity = env[WISHUB_SECURITY_KEY]
+                local allowedInstances = type(activeSecurity) == "table" and activeSecurity.AllowedInstances or nil
+                if not child or not child.Parent or baseline[child] or (allowedInstances and allowedInstances[child]) then
+                    return
+                end
+                if IsForeignUiCandidate(child, strictUiLock) then
+                    KickWishHubLocked()
+                    return
+                end
+                task.wait(0.25)
             end
         end)
     end)
