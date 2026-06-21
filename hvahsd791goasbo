@@ -230,7 +230,7 @@ local WISHUB_TOGGLE_GUI_NAME = "ToggleUIButton"
 local WISHUB_NOTIFY_GUI_NAME = "NotifyGui"
 local WISHUB_LOCK_KEY = "__WishHubActive"
 local WISHUB_SECURITY_KEY = "__WishHubSecurity"
-local WISHUB_KICK_MESSAGE = "KALAU WISHUB YA WISHUB AJA, WISHUB GASUKA DI DUAIN :("
+local WISHUB_KICK_MESSAGE = "WisHUB Security Alert"
 
 local function GetExecutorEnvironment()
     if getgenv then
@@ -305,9 +305,8 @@ local function FindUnsafeEnvironmentMarker()
         "RemoteSpyExecuted",
         "RemoteLogger",
         "RemoteLoggerExecuted",
-        "RemoteEventSpy",
-        "RemoteFunctionSpy",
-        "Hydroxide",
+        "RemoteEventLogger",
+        "RemoteFunctionLogger",
         "HTTPSpy",
         "HttpSpy",
         "HttpSpyLoaded",
@@ -322,9 +321,9 @@ local function FindUnsafeEnvironmentMarker()
         "HTTPRequestLogger",
         "request_logger",
         "http_logger",
+        "Hydroxide",
+        "DarkDex",
         "CobaltRemoteSpy",
-        "SpyGui",
-        "Spy",
     }
 
     for _, key in ipairs(markers) do
@@ -336,9 +335,6 @@ local function FindUnsafeEnvironmentMarker()
         end
     end
 
-    if AntiSpy and AntiSpy.hasHookedRequest and AntiSpy.hasHookedRequest() then
-        return "HookedRequest"
-    end
 end
 
 local function IsForeignUiCandidate(child, strictUiLock)
@@ -360,22 +356,6 @@ local function IsForeignUiCandidate(child, strictUiLock)
         "httplogger",
         "hydroxide",
         "darkdex",
-        "infiniteyield",
-        "rayfield",
-        "orion",
-        "kavo",
-        "linoria",
-        "fluent",
-        "windui",
-        "venyx",
-        "mercury",
-        "hub",
-        "service",
-        "speed",
-        "atomic",
-        "than",
-        "lime",
-        "pandora",
         "spy",
         "logger",
         "remote",
@@ -384,29 +364,44 @@ local function IsForeignUiCandidate(child, strictUiLock)
         "remotefunction",
         "requestspy",
         "requestlogger",
-        "httpspy",
         "httplog",
-        "httplogger",
         "hookspy",
         "cobalt",
+        "remotelogger",
+        "remoteeventspy",
+        "remotefunctionspy",
+        "remoteeventlogger",
+        "remotefunctionlogger",
+        "cobaltremotespy",
+        "speedhub",
+        "speedhubx",
     }
 
     local blockedTextNames = {
         "speedhub",
         "speedhubx",
-        "atomichub",
-        "pandorahub",
-        "limehub",
-        "than",
+        "simplespy",
         "remotespy",
+        "httpspy",
+        "httplogger",
+        "hydroxide",
+        "darkdex",
+        "spy",
+        "logger",
+        "remote",
+        "remotes",
+        "remoteevent",
+        "remotefunction",
+        "requestspy",
+        "requestlogger",
+        "httplog",
+        "hookspy",
+        "cobalt",
         "remotelogger",
         "remoteeventspy",
         "remotefunctionspy",
-        "httpspy",
-        "httplogger",
-        "requestspy",
-        "requestlogger",
-        "simplespy",
+        "remoteeventlogger",
+        "remotefunctionlogger",
         "cobaltremotespy",
     }
 
