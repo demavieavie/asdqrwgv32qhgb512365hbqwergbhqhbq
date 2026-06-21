@@ -136,15 +136,6 @@ local function KickWishHubLocked()
     end)
 end
 
-local function FreezeIfProtected(value, enabled)
-    if enabled and type(value) == "table" and table.freeze then
-        pcall(function()
-            table.freeze(value)
-        end)
-    end
-    return value
-end
-
 local function MakeBlockedTabs()
     local noop = function() end
     local paragraph = {
@@ -242,6 +233,13 @@ local function IsForeignUiCandidate(child, strictUiLock)
         "windui",
         "venyx",
         "mercury",
+        "hub",
+        "service",
+        "speed",
+        "atomic",
+        "than",
+        "lime",
+        "pandora",
     }
 
     for _, blockedName in ipairs(blockedNames) do
@@ -3850,13 +3848,13 @@ function Chloex:Window(GuiConfig)
             end
 
             CountSection = CountSection + 1
-            return FreezeIfProtected(Items, GuiConfig.Protection)
+            return Items
         end
 
         CountTab = CountTab + 1
         local safeName = TabConfig.Name:gsub("%s+", "_")
         _G[safeName] = Sections
-        return FreezeIfProtected(Sections, GuiConfig.Protection)
+        return Sections
     end
 
     function Tabs:InfoTab(InfoConfig)
@@ -3933,8 +3931,7 @@ function Chloex:Window(GuiConfig)
         end
     end)
 
-    FreezeIfProtected(GuiFunc, GuiConfig.Protection)
-    return FreezeIfProtected(Tabs, GuiConfig.Protection)
+    return Tabs
 end
 
 return Chloex
