@@ -214,6 +214,45 @@ local function FindUnsafeEnvironmentMarker()
     end
 end
 
+local function IsForeignUiCandidate(child, strictUiLock)
+    if not child or not child:IsA("ScreenGui") then
+        return false
+    end
+
+    if strictUiLock then
+        return true
+    end
+
+    local name = string.lower(tostring(child.Name or ""))
+    name = name:gsub("[%s_%-%[%]%.]", "")
+
+    local blockedNames = {
+        "simplespy",
+        "remotespy",
+        "httpspy",
+        "httplogger",
+        "hydroxide",
+        "darkdex",
+        "infiniteyield",
+        "rayfield",
+        "orion",
+        "kavo",
+        "linoria",
+        "fluent",
+        "windui",
+        "venyx",
+        "mercury",
+    }
+
+    for _, blockedName in ipairs(blockedNames) do
+        if string.find(name, blockedName, 1, true) then
+            return true
+        end
+    end
+
+    return false
+end
+
 local function ReleaseWishHubProtection()
     local env = GetExecutorEnvironment()
     local security = env[WISHUB_SECURITY_KEY]
@@ -239,6 +278,7 @@ end
 
 local function StartWishHubProtection(guiConfig)
     local env = GetExecutorEnvironment()
+    local strictUiLock = guiConfig and guiConfig.StrictUILock == true
     if env[WISHUB_LOCK_KEY] or CoreGui:FindFirstChild(WISHUB_GUI_NAME) or CoreGui:FindFirstChild(WISHUB_TOGGLE_GUI_NAME) then
         KickWishHubLocked()
         return false
@@ -272,7 +312,7 @@ local function StartWishHubProtection(guiConfig)
             if not child or not child.Parent or baseline[child] or (allowedInstances and allowedInstances[child]) then
                 return
             end
-            if child:IsA("ScreenGui") then
+            if IsForeignUiCandidate(child, strictUiLock) then
                 KickWishHubLocked()
             end
         end)
@@ -674,6 +714,7 @@ function Chloex:Window(GuiConfig)
     GuiConfig.Version      = GuiConfig.Version or 1
     if GuiConfig.Search == nil then GuiConfig.Search = true end
     if GuiConfig.Protection == nil then GuiConfig.Protection = true end
+    if GuiConfig.StrictUILock == nil then GuiConfig.StrictUILock = false end
 
     if GuiConfig.Protection and not StartWishHubProtection(GuiConfig) then
         return MakeBlockedTabs()
