@@ -231,6 +231,17 @@ local WISHUB_NOTIFY_GUI_NAME = "NotifyGui"
 local WISHUB_LOCK_KEY = "__WishHubActive"
 local WISHUB_SECURITY_KEY = "__WishHubSecurity"
 local WISHUB_KICK_MESSAGE = "WisHUB Security Alert"
+local WISHUB_OWNED_ATTRIBUTE = "WisHubOwned"
+local WISHUB_ALLOWED_SCREEN_GUI_NAMES = {
+    [WISHUB_GUI_NAME] = true,
+    [WISHUB_TOGGLE_GUI_NAME] = true,
+    [WISHUB_NOTIFY_GUI_NAME] = true,
+    WisHubFruitEsp = true,
+    WisHubGardenValueGui = true,
+    WisHubHarvestInventoryValue = true,
+    WisHubPetFinderGui = true,
+    WisHubRevealEventGui = true,
+}
 
 local function GetExecutorEnvironment()
     if getgenv then
@@ -456,6 +467,9 @@ end
 
 local function AllowWishHubInstance(instance)
     if not instance then return end
+    pcall(function()
+        instance:SetAttribute(WISHUB_OWNED_ATTRIBUTE, true)
+    end)
     local security = GetExecutorEnvironment()[WISHUB_SECURITY_KEY]
     if type(security) == "table" then
         security.AllowedInstances = security.AllowedInstances or {}
@@ -469,6 +483,17 @@ local function IsWishHubAllowedInstance(instance, security)
     end
 
     if instance.Name == "RobloxGui" then
+        return true
+    end
+
+    if WISHUB_ALLOWED_SCREEN_GUI_NAMES[instance.Name] then
+        return true
+    end
+
+    local ok, owned = pcall(function()
+        return instance:GetAttribute(WISHUB_OWNED_ATTRIBUTE)
+    end)
+    if ok and owned == true then
         return true
     end
 
@@ -531,8 +556,7 @@ local function StartWishHubProtection(guiConfig)
         task.defer(function()
             for _ = 1, 6 do
                 local activeSecurity = env[WISHUB_SECURITY_KEY]
-                local allowedInstances = type(activeSecurity) == "table" and activeSecurity.AllowedInstances or nil
-                if not child or not child.Parent or baseline[child] or (allowedInstances and allowedInstances[child]) then
+                if not child or not child.Parent or baseline[child] or IsWishHubAllowedInstance(child, activeSecurity) then
                     return
                 end
                 if IsForeignUiCandidate(child, strictUiLock) then
@@ -726,6 +750,11 @@ function CircleClick(Button, X, Y)
 end
 
 local Chloex = {}
+
+function Chloex:AllowInstance(instance)
+    AllowWishHubInstance(instance)
+    return instance
+end
 
 function Chloex:SecureRequest(opts)
     return AntiSpy.request(opts)
