@@ -1,47 +1,61 @@
 local HttpService = game:GetService("HttpService")
 
-if not isfolder("Wisnu") then
-    makefolder("Wisnu")
-end
-if not isfolder("Wisnu/Config") then
-    makefolder("Wisnu/Config")
-end
-
 local gameName   = tostring(game:GetService("MarketplaceService"):GetProductInfo(game.PlaceId).Name)
 gameName         = gameName:gsub("[^%w_ ]", "")
 gameName         = gameName:gsub("%s+", "_")
 
-local ConfigFile = "WisHub/Config/" .. gameName .. ".json"
+local ConfigRoot = "WisHUB_UI_Settings"
+local ConfigFolder = ConfigRoot .. "/Configs"
+local GameConfigFolder = ConfigFolder .. "/" .. gameName
+local AutoLoadFile = GameConfigFolder .. "/_autoload.json"
 
 ConfigData       = {}
 Elements         = {}
 CURRENT_VERSION  = nil
 
-function SaveConfig()
-    if writefile then
-        ConfigData._version = CURRENT_VERSION
-        writefile(ConfigFile, HttpService:JSONEncode(ConfigData))
+local function EnsureFolder(path)
+    if isfolder and makefolder and not isfolder(path) then
+        makefolder(path)
     end
+end
+
+local function EnsureConfigFolder()
+    EnsureFolder(ConfigRoot)
+    EnsureFolder(ConfigFolder)
+    EnsureFolder(GameConfigFolder)
+end
+
+local function CleanFileName(name)
+    name = tostring(name or "")
+    name = name:gsub("^%s+", ""):gsub("%s+$", "")
+    name = name:gsub("[^%w_%- ]", "_")
+    name = name:gsub("%s+", "_")
+    return name
+end
+
+local function GetConfigPath(name)
+    return GameConfigFolder .. "/" .. CleanFileName(name) .. ".json"
+end
+
+local function ShouldUseConfig(cfg)
+    return cfg.NoConfig ~= true and cfg.Config ~= false
+end
+
+function SaveConfig(path)
+    if path and writefile then
+        EnsureConfigFolder()
+        ConfigData._version = CURRENT_VERSION
+        local ok = pcall(function()
+            writefile(path, HttpService:JSONEncode(ConfigData))
+        end)
+        return ok
+    end
+    return false
 end
 
 function LoadConfigFromFile()
     if not CURRENT_VERSION then return end
-    if isfile and isfile(ConfigFile) then
-        local success, result = pcall(function()
-            return HttpService:JSONDecode(readfile(ConfigFile))
-        end)
-        if success and type(result) == "table" then
-            if result._version == CURRENT_VERSION then
-                ConfigData = result
-            else
-                ConfigData = { _version = CURRENT_VERSION }
-            end
-        else
-            ConfigData = { _version = CURRENT_VERSION }
-        end
-    else
-        ConfigData = { _version = CURRENT_VERSION }
-    end
+    ConfigData = { _version = CURRENT_VERSION }
 end
 
 function LoadConfigElements()
@@ -91,10 +105,191 @@ local Icons = {
 
 local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
+local TextService = game:GetService("TextService")
 local LocalPlayer = game:GetService("Players").LocalPlayer
 local Mouse = LocalPlayer:GetMouse()
 local CoreGui = game:GetService("CoreGui")
 local viewport = workspace.CurrentCamera.ViewportSize
+
+local WISHUB_GUI_NAME = "NatUI"
+local WISHUB_TOGGLE_GUI_NAME = "ToggleUIButton"
+local WISHUB_NOTIFY_GUI_NAME = "NotifyGui"
+local WISHUB_LOCK_KEY = "__WishHubActive"
+local WISHUB_SECURITY_KEY = "__WishHubSecurity"
+local WISHUB_KICK_MESSAGE = "KALAU WISHUB YA WISHUB AJA, WISHUB GASUKA DI DUAIN :("
+
+local function GetExecutorEnvironment()
+    if getgenv then
+        local ok, env = pcall(getgenv)
+        if ok and type(env) == "table" then
+            return env
+        end
+    end
+    return _G
+end
+
+local function KickWishHubLocked()
+    pcall(function()
+        if LocalPlayer then
+            LocalPlayer:Kick(WISHUB_KICK_MESSAGE)
+        end
+    end)
+end
+
+local function FreezeIfProtected(value, enabled)
+    if enabled and type(value) == "table" and table.freeze then
+        pcall(function()
+            table.freeze(value)
+        end)
+    end
+    return value
+end
+
+local function MakeBlockedTabs()
+    local noop = function() end
+    local paragraph = {
+        Instances = {},
+        Set = noop,
+        SetTitle = noop,
+        SetContent = noop,
+        Destroy = noop,
+    }
+    local items = {}
+    function items:AddParagraph() return paragraph end
+    function items:AddPanel() return { Set = noop, GetInput = function() return "" end, Instances = {} } end
+    function items:AddButton() return nil end
+    function items:AddToggle() return { Set = noop, Value = false, Instances = {} } end
+    function items:AddSlider() return { Set = noop, Value = 0, Instances = {} } end
+    function items:AddInput() return { Set = noop, Value = "", Instances = {} } end
+    function items:AddDropdown() return { Set = noop, AddOption = noop, RemoveOption = noop, Refresh = noop, Value = nil, Instances = {} } end
+    function items:AddConfig() return { Refresh = noop } end
+    function items:AddBanner() return nil end
+    function items:AddCard() return nil end
+    function items:AddDivider() return nil end
+    function items:AddSubSection() return nil end
+
+    local sections = {}
+    function sections:AddSection() return items end
+
+    local tabs = {
+        Window = {
+            DestroyGui = noop,
+            ToggleUI = noop,
+            ExportConfig = function() return "" end,
+            ImportConfig = function() return false end,
+        },
+    }
+    function tabs:AddTab() return sections end
+    function tabs:InfoTab() return sections, items end
+    tabs.ExportConfig = function() return "" end
+    tabs.ImportConfig = function() return false end
+    return tabs
+end
+
+local function FindUnsafeEnvironmentMarker()
+    local env = GetExecutorEnvironment()
+    local markers = {
+        "SimpleSpy",
+        "SimpleSpyExecuted",
+        "RemoteSpy",
+        "RemoteSpyExecuted",
+        "Hydroxide",
+        "HTTPSpy",
+        "HttpSpy",
+        "HttpLogger",
+        "HTTPLogger",
+        "HttpGetLogger",
+        "request_logger",
+        "http_logger",
+        "CobaltRemoteSpy",
+    }
+
+    for _, key in ipairs(markers) do
+        local ok, value = pcall(function()
+            return env[key]
+        end)
+        if ok and value ~= nil then
+            return key
+        end
+    end
+end
+
+local function ReleaseWishHubProtection()
+    local env = GetExecutorEnvironment()
+    local security = env[WISHUB_SECURITY_KEY]
+    if type(security) == "table" then
+        for _, connection in pairs(security.Connections or {}) do
+            pcall(function()
+                connection:Disconnect()
+            end)
+        end
+    end
+    env[WISHUB_SECURITY_KEY] = nil
+    env[WISHUB_LOCK_KEY] = nil
+end
+
+local function AllowWishHubInstance(instance)
+    if not instance then return end
+    local security = GetExecutorEnvironment()[WISHUB_SECURITY_KEY]
+    if type(security) == "table" then
+        security.AllowedInstances = security.AllowedInstances or {}
+        security.AllowedInstances[instance] = true
+    end
+end
+
+local function StartWishHubProtection(guiConfig)
+    local env = GetExecutorEnvironment()
+    if env[WISHUB_LOCK_KEY] or CoreGui:FindFirstChild(WISHUB_GUI_NAME) or CoreGui:FindFirstChild(WISHUB_TOGGLE_GUI_NAME) then
+        KickWishHubLocked()
+        return false
+    end
+
+    if FindUnsafeEnvironmentMarker() then
+        KickWishHubLocked()
+        return false
+    end
+
+    local baseline = {}
+    for _, child in ipairs(CoreGui:GetChildren()) do
+        baseline[child] = true
+    end
+
+    env[WISHUB_LOCK_KEY] = {
+        Active = true,
+        PlaceId = game.PlaceId,
+        Title = guiConfig and guiConfig.Title or "WisHub",
+        StartedAt = os.clock(),
+    }
+
+    local connections = {}
+    local security = { Connections = connections, AllowedInstances = {} }
+    env[WISHUB_SECURITY_KEY] = security
+
+    connections[#connections + 1] = CoreGui.ChildAdded:Connect(function(child)
+        task.defer(function()
+            local activeSecurity = env[WISHUB_SECURITY_KEY]
+            local allowedInstances = type(activeSecurity) == "table" and activeSecurity.AllowedInstances or nil
+            if not child or not child.Parent or baseline[child] or (allowedInstances and allowedInstances[child]) then
+                return
+            end
+            if child:IsA("ScreenGui") then
+                KickWishHubLocked()
+            end
+        end)
+    end)
+
+    task.spawn(function()
+        while env[WISHUB_LOCK_KEY] do
+            if FindUnsafeEnvironmentMarker() then
+                KickWishHubLocked()
+                break
+            end
+            task.wait(1)
+        end
+    end)
+
+    return true
+end
 
 local function isMobileDevice()
     return UserInputService.TouchEnabled
@@ -274,7 +469,8 @@ function Chloex:MakeNotify(NotifyConfig)
         if not CoreGui:FindFirstChild("NotifyGui") then
             local NotifyGui = Instance.new("ScreenGui");
             NotifyGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-            NotifyGui.Name = "NotifyGui"
+            NotifyGui.Name = WISHUB_NOTIFY_GUI_NAME
+            AllowWishHubInstance(NotifyGui)
             NotifyGui.Parent = CoreGui
         end
         if not CoreGui.NotifyGui:FindFirstChild("NotifyLayout") then
@@ -477,6 +673,11 @@ function Chloex:Window(GuiConfig)
     GuiConfig["Tab Width"] = GuiConfig["Tab Width"] or 120
     GuiConfig.Version      = GuiConfig.Version or 1
     if GuiConfig.Search == nil then GuiConfig.Search = true end
+    if GuiConfig.Protection == nil then GuiConfig.Protection = true end
+
+    if GuiConfig.Protection and not StartWishHubProtection(GuiConfig) then
+        return MakeBlockedTabs()
+    end
 
     CURRENT_VERSION        = GuiConfig.Version
     LoadConfigFromFile()
@@ -531,32 +732,25 @@ function Chloex:Window(GuiConfig)
             return false
         end
         local data = dec.Data or dec
+        local nextData = { _version = CURRENT_VERSION }
         for key, value in pairs(data) do
-            ConfigData[key] = value
-            if Elements[key] and Elements[key].Set then
-                pcall(function() Elements[key]:Set(value, true) end)
+            if key ~= "_version" then
+                nextData[key] = value
             end
         end
-        ConfigData._version = CURRENT_VERSION
-        SaveConfig()
+        ConfigData = nextData
+        LoadConfigElements()
         than("Config imported", 4, GuiConfig.Color, "WisHub", "Import")
         return true
-    end
-
-    local ConfigFolder = "WisHub/Configs"
-    local GameConfigFolder = ConfigFolder .. "/" .. gameName
-
-    local function EnsureConfigFolder()
-        if not isfolder("WisHub") then makefolder("WisHub") end
-        if not isfolder(ConfigFolder) then makefolder(ConfigFolder) end
-        if not isfolder(GameConfigFolder) then makefolder(GameConfigFolder) end
     end
 
     function GuiFunc:GetConfigs()
         local out = {}
         if not listfiles then return out end
         EnsureConfigFolder()
-        for _, f in ipairs(listfiles(GameConfigFolder)) do
+        local ok, files = pcall(function() return listfiles(GameConfigFolder) end)
+        if not ok or type(files) ~= "table" then return out end
+        for _, f in ipairs(files) do
             local n = string.match(f, "([^/\\]+)%.json$")
             if n and n ~= "_autoload" then
                 table.insert(out, n)
@@ -566,25 +760,25 @@ function Chloex:Window(GuiConfig)
     end
 
     function GuiFunc:SaveConfigAs(name)
-        if not name or name == "" then
+        local cleanName = CleanFileName(name)
+        if cleanName == "" then
             than("Enter a config name first", 4, Color3.fromRGB(255, 90, 90), "WisHub", "Config")
             return false
         end
-        if not writefile then return false end
-        EnsureConfigFolder()
-        local snapshot = {}
-        for k, v in pairs(ConfigData) do snapshot[k] = v end
-        snapshot._version = CURRENT_VERSION
-        writefile(GameConfigFolder .. "/" .. name .. ".json", HttpService:JSONEncode(snapshot))
-        than("Saved '" .. name .. "'", 4, GuiConfig.Color, "WisHub", "Config")
-        return true
+        if not SaveConfig(GetConfigPath(cleanName)) then
+            than("Save unavailable", 4, Color3.fromRGB(255, 90, 90), "WisHub", "Config")
+            return false
+        end
+        than("Saved '" .. cleanName .. "'", 4, GuiConfig.Color, "WisHub", "Config")
+        return true, cleanName
     end
 
     function GuiFunc:LoadConfigByName(name)
-        if not name or name == "" then return false end
-        local path = GameConfigFolder .. "/" .. name .. ".json"
+        local cleanName = CleanFileName(name)
+        if cleanName == "" then return false end
+        local path = GetConfigPath(cleanName)
         if not (isfile and isfile(path)) then
-            than("Config '" .. tostring(name) .. "' not found", 4, Color3.fromRGB(255, 90, 90), "WisHub", "Config")
+            than("Config '" .. tostring(cleanName) .. "' not found", 4, Color3.fromRGB(255, 90, 90), "WisHub", "Config")
             return false
         end
         local ok, dec = pcall(function() return HttpService:JSONDecode(readfile(path)) end)
@@ -592,41 +786,46 @@ function Chloex:Window(GuiConfig)
             than("Failed to read config", 4, Color3.fromRGB(255, 90, 90), "WisHub", "Config")
             return false
         end
-        for key, value in pairs(dec) do
+        local data = dec.Data or dec
+        local nextData = { _version = CURRENT_VERSION }
+        for key, value in pairs(data) do
             if key ~= "_version" then
-                ConfigData[key] = value
-                if Elements[key] and Elements[key].Set then
-                    pcall(function() Elements[key]:Set(value, true) end)
-                end
+                nextData[key] = value
             end
         end
-        ConfigData._version = CURRENT_VERSION
-        SaveConfig()
-        than("Loaded '" .. name .. "'", 4, GuiConfig.Color, "WisHub", "Config")
+        ConfigData = nextData
+        LoadConfigElements()
+        than("Loaded '" .. cleanName .. "'", 4, GuiConfig.Color, "WisHub", "Config")
         return true
     end
 
     function GuiFunc:DeleteConfig(name)
-        local path = GameConfigFolder .. "/" .. name .. ".json"
+        local cleanName = CleanFileName(name)
+        local path = GetConfigPath(cleanName)
         if isfile and isfile(path) and delfile then
             delfile(path)
-            than("Deleted '" .. name .. "'", 4, Color3.fromRGB(255, 170, 0), "WisHub", "Config")
+            than("Deleted '" .. cleanName .. "'", 4, Color3.fromRGB(255, 170, 0), "WisHub", "Config")
             return true
         end
         return false
     end
 
-    function GuiFunc:SetAutoLoad(name)
+    function GuiFunc:SetAutoLoad(name, enabled)
         if not writefile then return end
         EnsureConfigFolder()
-        writefile(GameConfigFolder .. "/_autoload.json", HttpService:JSONEncode({ Name = name or "" }))
+        local cleanName = CleanFileName(name)
+        pcall(function()
+            writefile(AutoLoadFile, HttpService:JSONEncode({
+                Enabled = enabled == true and cleanName ~= "",
+                Name = cleanName,
+            }))
+        end)
     end
 
     function GuiFunc:GetAutoLoad()
-        local path = GameConfigFolder .. "/_autoload.json"
-        if isfile and isfile(path) then
-            local ok, dec = pcall(function() return HttpService:JSONDecode(readfile(path)) end)
-            if ok and type(dec) == "table" then return dec.Name or "" end
+        if isfile and isfile(AutoLoadFile) then
+            local ok, dec = pcall(function() return HttpService:JSONDecode(readfile(AutoLoadFile)) end)
+            if ok and type(dec) == "table" and dec.Enabled ~= false then return dec.Name or "" end
         end
         return ""
     end
@@ -651,13 +850,14 @@ function Chloex:Window(GuiConfig)
     local UICorner6 = Instance.new("UICorner");
     local NameTab = Instance.new("TextLabel");
     local LayersReal = Instance.new("Frame");
-    local LayersFolder = Instance.new("Folder");
+    local LayersFolder = Instance.new("Frame");
     local LayersPageLayout = Instance.new("UIPageLayout");
 
     NatUI.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-    NatUI.Name = "NatUI"
+    NatUI.Name = WISHUB_GUI_NAME
     NatUI.ResetOnSpawn = false
-    NatUI.Parent = game:GetService("CoreGui")
+    AllowWishHubInstance(NatUI)
+    NatUI.Parent = CoreGui
 
     DropShadowHolder.BackgroundTransparency = 1
     DropShadowHolder.BorderSizePixel = 0
@@ -919,6 +1119,9 @@ function Chloex:Window(GuiConfig)
     LayersReal.Name = "LayersReal"
     LayersReal.Parent = Layers
 
+    LayersFolder.BackgroundTransparency = 1
+    LayersFolder.BorderSizePixel = 0
+    LayersFolder.Size = UDim2.new(1, 0, 1, 0)
     LayersFolder.Name = "LayersFolder"
     LayersFolder.Parent = LayersReal
 
@@ -954,14 +1157,9 @@ function Chloex:Window(GuiConfig)
     UIListLayout.Parent = ScrollTab
 
     local function UpdateSize1()
-        local OffsetY = 0
-        for _, child in ScrollTab:GetChildren() do
-            if child.Name ~= "UIListLayout" then
-                OffsetY = OffsetY + 3 + child.Size.Y.Offset
-            end
-        end
-        ScrollTab.CanvasSize = UDim2.new(0, 0, 0, OffsetY)
+        ScrollTab.CanvasSize = UDim2.new(0, 0, 0, UIListLayout.AbsoluteContentSize.Y + 6)
     end
+    UIListLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(UpdateSize1)
     ScrollTab.ChildAdded:Connect(UpdateSize1)
     ScrollTab.ChildRemoved:Connect(UpdateSize1)
 
@@ -1147,9 +1345,14 @@ function Chloex:Window(GuiConfig)
     end
 
     function GuiFunc:DestroyGui()
-        if CoreGui:FindFirstChild("NatUI") then
+        if CoreGui:FindFirstChild(WISHUB_GUI_NAME) then
             NatUI:Destroy()
         end
+        local toggleGui = CoreGui:FindFirstChild(WISHUB_TOGGLE_GUI_NAME)
+        if toggleGui then
+            toggleGui:Destroy()
+        end
+        ReleaseWishHubProtection()
     end
 
     Min.Activated:Connect(function()
@@ -1255,9 +1458,11 @@ function Chloex:Window(GuiConfig)
 
         Yes.MouseButton1Click:Connect(function()
             if NatUI then NatUI:Destroy() end
-            if game.CoreGui:FindFirstChild("ToggleUIButton") then
-                game.CoreGui.ToggleUIButton:Destroy()
+            local toggleGui = CoreGui:FindFirstChild(WISHUB_TOGGLE_GUI_NAME)
+            if toggleGui then
+                toggleGui:Destroy()
             end
+            ReleaseWishHubProtection()
         end)
 
         Cancel.MouseButton1Click:Connect(function()
@@ -1266,10 +1471,16 @@ function Chloex:Window(GuiConfig)
     end)
 
     function GuiFunc:ToggleUI()
+        local toggleGui = CoreGui:FindFirstChild(WISHUB_TOGGLE_GUI_NAME)
+        if toggleGui then
+            toggleGui:Destroy()
+        end
+
         local ScreenGui = Instance.new("ScreenGui")
-        ScreenGui.Parent = game:GetService("CoreGui")
         ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-        ScreenGui.Name = "ToggleUIButton"
+        ScreenGui.Name = WISHUB_TOGGLE_GUI_NAME
+        AllowWishHubInstance(ScreenGui)
+        ScreenGui.Parent = CoreGui
 
         local MainButton = Instance.new("ImageLabel")
         MainButton.Parent = ScreenGui
@@ -1415,13 +1626,13 @@ function Chloex:Window(GuiConfig)
     UICorner36.CornerRadius = UDim.new(0, 3)
     UICorner36.Parent = DropdownSelect
 
-    UIStroke14.Color = Color3.fromRGB(12, 159, 255)
+    UIStroke14.Color = Color3.fromRGB(183, 0, 226)
     UIStroke14.Thickness = 2.5
     UIStroke14.Transparency = 0.8
     UIStroke14.Parent = DropdownSelect
 
     DropdownSelectReal.AnchorPoint = Vector2.new(0.5, 0.5)
-    DropdownSelectReal.BackgroundColor3 = Color3.fromRGB(0, 27, 98)
+    DropdownSelectReal.BackgroundColor3 = Color3.fromRGB(183, 0, 226)
     DropdownSelectReal.BackgroundTransparency = 0.7
     DropdownSelectReal.BorderColor3 = Color3.fromRGB(0, 0, 0)
     DropdownSelectReal.BorderSizePixel = 0
@@ -1840,19 +2051,36 @@ function Chloex:Window(GuiConfig)
             local CountItem = 0
 
             function Items:AddParagraph(ParagraphConfig)
-                local ParagraphConfig = ParagraphConfig or {}
-                ParagraphConfig.Title = ParagraphConfig.Title or "Title"
-                ParagraphConfig.Content = ParagraphConfig.Content or "Content"
-                local ParagraphFunc = {}
+                ParagraphConfig = ParagraphConfig or {}
+                ParagraphConfig.Title = ParagraphConfig.Title or ParagraphConfig.Name or "Title"
+                ParagraphConfig.Content = ParagraphConfig.Content or ParagraphConfig.Description or ParagraphConfig.Text or "Content"
+                ParagraphConfig.ButtonText = ParagraphConfig.ButtonText or ParagraphConfig.Button
+                ParagraphConfig.ButtonCallback = ParagraphConfig.ButtonCallback or ParagraphConfig.Callback
 
                 local Paragraph = Instance.new("Frame")
                 local UICorner14 = Instance.new("UICorner")
                 local ParagraphTitle = Instance.new("TextLabel")
                 local ParagraphContent = Instance.new("TextLabel")
+                local ParagraphButton
+                local ParagraphIcon
+                local leftPadding = 10
+                local rightPadding = 10
+
+                local ParagraphFunc = {
+                    Value = ParagraphConfig.Content,
+                    Instances = {
+                        Root = Paragraph,
+                        Corner = UICorner14,
+                        Title = ParagraphTitle,
+                        Content = ParagraphContent,
+                    },
+                }
 
                 Paragraph.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
                 Paragraph.BackgroundTransparency = 0.935
+                Paragraph.BorderColor3 = Color3.fromRGB(0, 0, 0)
                 Paragraph.BorderSizePixel = 0
+                Paragraph.ClipsDescendants = false
                 Paragraph.LayoutOrder = CountItem
                 Paragraph.Size = UDim2.new(1, 0, 0, 46)
                 Paragraph.Name = "Paragraph"
@@ -1861,91 +2089,161 @@ function Chloex:Window(GuiConfig)
                 UICorner14.CornerRadius = UDim.new(0, 4)
                 UICorner14.Parent = Paragraph
 
-                local iconOffset = 10
-                if ParagraphConfig.Icon then
-                    local IconImg = Instance.new("ImageLabel")
-                    IconImg.Size = UDim2.new(0, 20, 0, 20)
-                    IconImg.Position = UDim2.new(0, 8, 0, 12)
-                    IconImg.BackgroundTransparency = 1
-                    IconImg.Name = "ParagraphIcon"
-                    IconImg.Parent = Paragraph
+                if ParagraphConfig.Icon and tostring(ParagraphConfig.Icon) ~= "" then
+                    ParagraphIcon = Instance.new("ImageLabel")
+                    ParagraphIcon.Size = UDim2.new(0, 20, 0, 20)
+                    ParagraphIcon.Position = UDim2.new(0, 8, 0, 12)
+                    ParagraphIcon.BackgroundTransparency = 1
+                    ParagraphIcon.BorderSizePixel = 0
+                    ParagraphIcon.Name = "ParagraphIcon"
+                    ParagraphIcon.Parent = Paragraph
+                    ParagraphFunc.Instances.Icon = ParagraphIcon
 
                     if Icons and Icons[ParagraphConfig.Icon] then
-                        IconImg.Image = Icons[ParagraphConfig.Icon]
+                        ParagraphIcon.Image = Icons[ParagraphConfig.Icon]
                     else
-                        IconImg.Image = ParagraphConfig.Icon
+                        ParagraphIcon.Image = tostring(ParagraphConfig.Icon)
                     end
 
-                    iconOffset = 30
+                    leftPadding = 36
                 end
 
                 ParagraphTitle.Font = Enum.Font.GothamBold
-                ParagraphTitle.Text = ParagraphConfig.Title
+                ParagraphTitle.Text = tostring(ParagraphConfig.Title)
                 ParagraphTitle.TextColor3 = Color3.fromRGB(231, 231, 231)
                 ParagraphTitle.TextSize = 13
                 ParagraphTitle.TextXAlignment = Enum.TextXAlignment.Left
                 ParagraphTitle.TextYAlignment = Enum.TextYAlignment.Top
                 ParagraphTitle.BackgroundTransparency = 1
-                ParagraphTitle.Position = UDim2.new(0, iconOffset, 0, 10)
-                ParagraphTitle.Size = UDim2.new(1, -16, 0, 13)
+                ParagraphTitle.BorderSizePixel = 0
+                ParagraphTitle.Position = UDim2.new(0, leftPadding, 0, 9)
+                ParagraphTitle.Size = UDim2.new(1, -(leftPadding + rightPadding), 0, 16)
                 ParagraphTitle.Name = "ParagraphTitle"
                 ParagraphTitle.Parent = Paragraph
 
                 ParagraphContent.Font = Enum.Font.Gotham
-                ParagraphContent.Text = ParagraphConfig.Content
+                ParagraphContent.Text = tostring(ParagraphConfig.Content)
                 ParagraphContent.TextColor3 = Color3.fromRGB(255, 255, 255)
                 ParagraphContent.TextSize = 12
                 ParagraphContent.TextXAlignment = Enum.TextXAlignment.Left
                 ParagraphContent.TextYAlignment = Enum.TextYAlignment.Top
                 ParagraphContent.BackgroundTransparency = 1
-                ParagraphContent.Position = UDim2.new(0, iconOffset, 0, 25)
+                ParagraphContent.BorderSizePixel = 0
+                ParagraphContent.Position = UDim2.new(0, leftPadding, 0, 26)
+                ParagraphContent.Size = UDim2.new(1, -(leftPadding + rightPadding), 0, 16)
                 ParagraphContent.Name = "ParagraphContent"
-                ParagraphContent.TextWrapped = false
-                ParagraphContent.RichText = true
+                ParagraphContent.TextWrapped = true
+                ParagraphContent.RichText = ParagraphConfig.RichText ~= false
                 ParagraphContent.Parent = Paragraph
 
-                ParagraphContent.Size = UDim2.new(1, -16, 0, ParagraphContent.TextBounds.Y)
-
-                local ParagraphButton
                 if ParagraphConfig.ButtonText then
                     ParagraphButton = Instance.new("TextButton")
-                    ParagraphButton.Position = UDim2.new(0, 10, 0, 42)
-                    ParagraphButton.Size = UDim2.new(1, -22, 0, 28)
+                    ParagraphButton.Position = UDim2.new(0, 10, 0, 44)
+                    ParagraphButton.Size = UDim2.new(1, -20, 0, 28)
                     ParagraphButton.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
                     ParagraphButton.BackgroundTransparency = 0.935
+                    ParagraphButton.BorderSizePixel = 0
                     ParagraphButton.Font = Enum.Font.GothamBold
                     ParagraphButton.TextSize = 12
                     ParagraphButton.TextTransparency = 0.3
                     ParagraphButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-                    ParagraphButton.Text = ParagraphConfig.ButtonText
+                    ParagraphButton.Text = tostring(ParagraphConfig.ButtonText)
+                    ParagraphButton.Name = "ParagraphButton"
                     ParagraphButton.Parent = Paragraph
+                    ParagraphFunc.Instances.Button = ParagraphButton
 
                     local btnCorner = Instance.new("UICorner")
                     btnCorner.CornerRadius = UDim.new(0, 6)
                     btnCorner.Parent = ParagraphButton
+                    ParagraphFunc.Instances.ButtonCorner = btnCorner
 
                     if ParagraphConfig.ButtonCallback then
-                        ParagraphButton.MouseButton1Click:Connect(ParagraphConfig.ButtonCallback)
+                        ParagraphButton.Activated:Connect(ParagraphConfig.ButtonCallback)
                     end
+                end
+
+                local function GetTextHeight(label)
+                    local width = label.AbsoluteSize.X
+                    if width <= 0 then
+                        local parentWidth = Paragraph.AbsoluteSize.X
+                        if parentWidth <= 0 then
+                            parentWidth = SectionAdd.AbsoluteSize.X
+                        end
+                        width = math.max(20, parentWidth - leftPadding - rightPadding)
+                    end
+
+                    local ok, size = pcall(function()
+                        return TextService:GetTextSize(label.Text, label.TextSize, label.Font, Vector2.new(width, math.huge))
+                    end)
+
+                    if ok and size then
+                        return math.ceil(size.Y)
+                    end
+
+                    return math.max(label.TextSize, label.TextBounds.Y)
+                end
+
+                local resizeQueued = false
+                local function QueueSectionResize()
+                    if resizeQueued then return end
+                    resizeQueued = true
+                    task.defer(function()
+                        resizeQueued = false
+                        UpdateSizeSection()
+                    end)
                 end
 
                 local function UpdateSize()
-                    local totalHeight = ParagraphContent.TextBounds.Y + 33
+                    local contentHeight = math.max(14, GetTextHeight(ParagraphContent))
+                    ParagraphTitle.Size = UDim2.new(1, -(leftPadding + rightPadding), 0, 16)
+                    ParagraphContent.Size = UDim2.new(1, -(leftPadding + rightPadding), 0, contentHeight)
+
+                    local totalHeight = 26 + contentHeight + 10
                     if ParagraphButton then
-                        totalHeight = totalHeight + ParagraphButton.Size.Y.Offset + 5
+                        local buttonTop = 26 + contentHeight + 8
+                        ParagraphButton.Position = UDim2.new(0, 10, 0, buttonTop)
+                        totalHeight = buttonTop + ParagraphButton.Size.Y.Offset + 8
                     end
-                    Paragraph.Size = UDim2.new(1, 0, 0, totalHeight)
+
+                    Paragraph.Size = UDim2.new(1, 0, 0, math.max(46, totalHeight))
+                    QueueSectionResize()
                 end
 
-                UpdateSize()
+                ParagraphContent:GetPropertyChangedSignal("Text"):Connect(UpdateSize)
+                Paragraph:GetPropertyChangedSignal("AbsoluteSize"):Connect(UpdateSize)
 
-                ParagraphContent:GetPropertyChangedSignal("TextBounds"):Connect(UpdateSize)
+                function ParagraphFunc:SetTitle(title)
+                    ParagraphTitle.Text = tostring(title or "Title")
+                    RegisterSearch({ label = ParagraphTitle.Text, tab = TabConfig.Name, kind = "Info", switch = SearchSwitch })
+                    UpdateSize()
+                end
 
                 function ParagraphFunc:SetContent(content)
                     content = content or "Content"
-                    ParagraphContent.Text = content
+                    ParagraphFunc.Value = content
+                    ParagraphContent.Text = tostring(content)
                     UpdateSize()
                 end
+
+                function ParagraphFunc:Set(data)
+                    if type(data) == "table" then
+                        if data.Title or data.Name then
+                            ParagraphFunc:SetTitle(data.Title or data.Name)
+                        end
+                        if data.Content or data.Description or data.Text then
+                            ParagraphFunc:SetContent(data.Content or data.Description or data.Text)
+                        end
+                    else
+                        ParagraphFunc:SetContent(data)
+                    end
+                end
+
+                function ParagraphFunc:Destroy()
+                    Paragraph:Destroy()
+                    QueueSectionResize()
+                end
+
+                task.defer(UpdateSize)
 
                 CountItem = CountItem + 1
                 RegisterSearch({ label = ParagraphConfig.Title, tab = TabConfig.Name, kind = "Info", switch = SearchSwitch })
@@ -1964,8 +2262,8 @@ function Chloex:Window(GuiConfig)
                 PanelConfig.SubButtonCallback = PanelConfig.SubCallback or PanelConfig.SubButtonCallback or
                     function() end
 
-                local configKey = "Panel_" .. PanelConfig.Title
-                if ConfigData[configKey] ~= nil then
+                local configKey = ShouldUseConfig(PanelConfig) and ("Panel_" .. PanelConfig.Title) or nil
+                if configKey and ConfigData[configKey] ~= nil then
                     PanelConfig.Default = ConfigData[configKey]
                 end
 
@@ -2098,8 +2396,9 @@ function Chloex:Window(GuiConfig)
                 if InputBox then
                     InputBox.FocusLost:Connect(function()
                         PanelFunc.Value = InputBox.Text
-                        ConfigData[configKey] = InputBox.Text
-                        SaveConfig()
+                        if configKey then
+                            ConfigData[configKey] = InputBox.Text
+                        end
                     end)
                 end
 
@@ -2179,8 +2478,8 @@ function Chloex:Window(GuiConfig)
                 ToggleConfig.Default = ToggleConfig.Default or false
                 ToggleConfig.Callback = ToggleConfig.Callback or function() end
 
-                local configKey = "Toggle_" .. ToggleConfig.Title
-                if ConfigData[configKey] ~= nil then
+                local configKey = ShouldUseConfig(ToggleConfig) and ("Toggle_" .. ToggleConfig.Title) or nil
+                if configKey and ConfigData[configKey] ~= nil then
                     ToggleConfig.Default = ConfigData[configKey]
                 end
 
@@ -2313,14 +2612,16 @@ function Chloex:Window(GuiConfig)
                 end)
 
                 function ToggleFunc:Set(Value)
+                    ToggleFunc.Value = Value
                     if typeof(ToggleConfig.Callback) == "function" then
                         local ok, err = pcall(function()
                             ToggleConfig.Callback(Value)
                         end)
                         if not ok then warn("Toggle Callback error:", err) end
                     end
-                    ConfigData[configKey] = Value
-                    SaveConfig()
+                    if configKey then
+                        ConfigData[configKey] = Value
+                    end
                     if Value then
                         TweenService:Create(ToggleTitle, TweenInfo.new(0.2), { TextColor3 = GuiConfig.Color }):Play()
                         TweenService:Create(ToggleCircle, TweenInfo.new(0.2), { Position = UDim2.new(0, 15, 0, 0) })
@@ -2342,7 +2643,9 @@ function Chloex:Window(GuiConfig)
 
                 ToggleFunc:Set(ToggleFunc.Value)
                 CountItem = CountItem + 1
-                Elements[configKey] = ToggleFunc
+                if configKey then
+                    Elements[configKey] = ToggleFunc
+                end
                 RegisterSearch({ label = ToggleConfig.Title, tab = TabConfig.Name, kind = "Toggle", element = ToggleFunc, switch = SearchSwitch })
                 return ToggleFunc
             end
@@ -2357,8 +2660,8 @@ function Chloex:Window(GuiConfig)
                 SliderConfig.Default = SliderConfig.Default or 50
                 SliderConfig.Callback = SliderConfig.Callback or function() end
 
-                local configKey = "Slider_" .. SliderConfig.Title
-                if ConfigData[configKey] ~= nil then
+                local configKey = ShouldUseConfig(SliderConfig) and ("Slider_" .. SliderConfig.Title) or nil
+                if configKey and ConfigData[configKey] ~= nil then
                     SliderConfig.Default = ConfigData[configKey]
                 end
 
@@ -2527,8 +2830,9 @@ function Chloex:Window(GuiConfig)
                     ):Play()
 
                     SliderConfig.Callback(Value)
-                    ConfigData[configKey] = Value
-                    SaveConfig()
+                    if configKey then
+                        ConfigData[configKey] = Value
+                    end
                 end
 
                 SliderFrame.InputBegan:Connect(function(Input)
@@ -2583,7 +2887,9 @@ function Chloex:Window(GuiConfig)
                 end)
                 SliderFunc:Set(SliderConfig.Default)
                 CountItem = CountItem + 1
-                Elements[configKey] = SliderFunc
+                if configKey then
+                    Elements[configKey] = SliderFunc
+                end
                 RegisterSearch({ label = SliderConfig.Title, tab = TabConfig.Name, kind = "Slider", element = SliderFunc, switch = SearchSwitch })
                 return SliderFunc
             end
@@ -2596,8 +2902,8 @@ function Chloex:Window(GuiConfig)
                 InputConfig.Default = InputConfig.Default or ""
                 InputConfig.Placeholder = InputConfig.Placeholder or "Input Here"
 
-                local configKey = "Input_" .. InputConfig.Title
-                if ConfigData[configKey] ~= nil then
+                local configKey = ShouldUseConfig(InputConfig) and ("Input_" .. InputConfig.Title) or nil
+                if configKey and ConfigData[configKey] ~= nil then
                     InputConfig.Default = ConfigData[configKey]
                 end
 
@@ -2705,8 +3011,13 @@ function Chloex:Window(GuiConfig)
                     InputTextBox.Text = Value
                     InputFunc.Value = Value
                     InputConfig.Callback(Value)
-                    ConfigData[configKey] = Value
-                    SaveConfig()
+                    if configKey then
+                        ConfigData[configKey] = Value
+                    end
+                end
+
+                function InputFunc:Get()
+                    return InputTextBox.Text
                 end
 
                 InputFunc:Set(InputFunc.Value)
@@ -2714,8 +3025,13 @@ function Chloex:Window(GuiConfig)
                 InputTextBox.FocusLost:Connect(function()
                     InputFunc:Set(InputTextBox.Text)
                 end)
+                InputTextBox:GetPropertyChangedSignal("Text"):Connect(function()
+                    InputFunc.Value = InputTextBox.Text
+                end)
                 CountItem = CountItem + 1
-                Elements[configKey] = InputFunc
+                if configKey then
+                    Elements[configKey] = InputFunc
+                end
                 RegisterSearch({ label = InputConfig.Title, tab = TabConfig.Name, kind = "Input", element = InputFunc, switch = SearchSwitch })
                 return InputFunc
             end
@@ -2729,8 +3045,8 @@ function Chloex:Window(GuiConfig)
                 DropdownConfig.Default = DropdownConfig.Default or (DropdownConfig.Multi and {} or nil)
                 DropdownConfig.Callback = DropdownConfig.Callback or function() end
 
-                local configKey = "Dropdown_" .. DropdownConfig.Title
-                if ConfigData[configKey] ~= nil then
+                local configKey = ShouldUseConfig(DropdownConfig) and ("Dropdown_" .. DropdownConfig.Title) or nil
+                if configKey and ConfigData[configKey] ~= nil then
                     DropdownConfig.Default = ConfigData[configKey]
                 end
 
@@ -2798,13 +3114,21 @@ function Chloex:Window(GuiConfig)
                 UICorner11.CornerRadius = UDim.new(0, 4)
                 UICorner11.Parent = SelectOptionsFrame
 
+                local SearchBox
                 DropdownButton.Activated:Connect(function()
-                    if not MoreBlur.Visible then
-                        MoreBlur.Visible = true
-                        DropPageLayout:JumpToIndex(SelectOptionsFrame.LayoutOrder)
+                    local wasHidden = not MoreBlur.Visible
+                    MoreBlur.Visible = true
+                    DropPageLayout:JumpToIndex(SelectOptionsFrame.LayoutOrder)
+                    if wasHidden then
                         TweenService:Create(MoreBlur, TweenInfo.new(0.3), { BackgroundTransparency = 1 }):Play()
                         TweenService:Create(DropdownSelect, TweenInfo.new(0.3), { Position = UDim2.new(1, -11, 0.5, 0) })
                             :Play()
+                    end
+                    if SearchBox then
+                        SearchBox.Text = ""
+                        task.defer(function()
+                            SearchBox:CaptureFocus()
+                        end)
                     end
                 end)
 
@@ -2835,7 +3159,7 @@ function Chloex:Window(GuiConfig)
                 DropdownContainer.BackgroundTransparency = 1
                 DropdownContainer.Parent = DropdownFolder
 
-                local SearchBox = Instance.new("TextBox")
+                SearchBox = Instance.new("TextBox")
                 SearchBox.PlaceholderText = "Search"
                 SearchBox.Font = Enum.Font.Gotham
                 SearchBox.Text = ""
@@ -2939,6 +3263,7 @@ function Chloex:Window(GuiConfig)
                     OptionText.Parent = Option
 
                     Option:SetAttribute("RealValue", value)
+                    Option:SetAttribute("Selected", false)
 
                     ChooseFrame.AnchorPoint = Vector2.new(0, 0.5)
                     ChooseFrame.BackgroundColor3 = GuiConfig.Color
@@ -2980,8 +3305,9 @@ function Chloex:Window(GuiConfig)
                             DropdownFunc.Value = (type(Value) == "table" and Value[1]) or Value
                         end
 
-                        ConfigData[configKey] = DropdownFunc.Value
-                        SaveConfig()
+                        if configKey then
+                            ConfigData[configKey] = DropdownFunc.Value
+                        end
 
                         local texts = {}
                         for _, Drop in ScrollSelect:GetChildren() do
@@ -2989,20 +3315,28 @@ function Chloex:Window(GuiConfig)
                                 local v = Drop:GetAttribute("RealValue")
                                 local selected = DropdownConfig.Multi and table.find(DropdownFunc.Value, v) or
                                     DropdownFunc.Value == v
+                                selected = selected ~= nil and selected ~= false
+                                local wasSelected = Drop:GetAttribute("Selected") == true
+
+                                if selected ~= wasSelected then
+                                    Drop:SetAttribute("Selected", selected)
+                                    if selected then
+                                        TweenService:Create(Drop.ChooseFrame, TweenInfo.new(0.2),
+                                            { Size = UDim2.new(0, 1, 0, 12) }):Play()
+                                        TweenService:Create(Drop.ChooseFrame.UIStroke, TweenInfo.new(0.2), { Transparency = 0 })
+                                            :Play()
+                                        TweenService:Create(Drop, TweenInfo.new(0.2), { BackgroundTransparency = 0.935 }):Play()
+                                    else
+                                        TweenService:Create(Drop.ChooseFrame, TweenInfo.new(0.1),
+                                            { Size = UDim2.new(0, 0, 0, 0) }):Play()
+                                        TweenService:Create(Drop.ChooseFrame.UIStroke, TweenInfo.new(0.1),
+                                            { Transparency = 0.999 }):Play()
+                                        TweenService:Create(Drop, TweenInfo.new(0.1), { BackgroundTransparency = 0.999 }):Play()
+                                    end
+                                end
 
                                 if selected then
-                                    TweenService:Create(Drop.ChooseFrame, TweenInfo.new(0.2),
-                                        { Size = UDim2.new(0, 1, 0, 12) }):Play()
-                                    TweenService:Create(Drop.ChooseFrame.UIStroke, TweenInfo.new(0.2), { Transparency = 0 })
-                                        :Play()
-                                    TweenService:Create(Drop, TweenInfo.new(0.2), { BackgroundTransparency = 0.935 }):Play()
                                     table.insert(texts, Drop.OptionText.Text)
-                                else
-                                    TweenService:Create(Drop.ChooseFrame, TweenInfo.new(0.1),
-                                        { Size = UDim2.new(0, 0, 0, 0) }):Play()
-                                    TweenService:Create(Drop.ChooseFrame.UIStroke, TweenInfo.new(0.1),
-                                        { Transparency = 0.999 }):Play()
-                                    TweenService:Create(Drop, TweenInfo.new(0.1), { BackgroundTransparency = 0.999 }):Play()
                                 end
                             end
                         end
@@ -3050,7 +3384,9 @@ function Chloex:Window(GuiConfig)
 
                 CountItem = CountItem + 1
                 CountDropdown = CountDropdown + 1
-                Elements[configKey] = DropdownFunc
+                if configKey then
+                    Elements[configKey] = DropdownFunc
+                end
                 RegisterSearch({ label = DropdownConfig.Title, tab = TabConfig.Name, kind = "Dropdown", element = DropdownFunc, switch = SearchSwitch })
                 return DropdownFunc
             end
@@ -3060,15 +3396,26 @@ function Chloex:Window(GuiConfig)
 
                 local currentName = ""
                 local selectedConfig = nil
+                local autoName = GuiFunc:GetAutoLoad()
+                if autoName ~= "" then
+                    currentName = autoName
+                    selectedConfig = autoName
+                end
 
                 local NameInput = Items:AddInput({
                     Title       = "Config Name",
                     Content     = "Name for saving",
                     Placeholder = "MyConfig",
+                    Default     = currentName,
+                    NoConfig    = true,
                     Callback    = function(text) currentName = text end,
                 })
 
                 local ConfigList
+                local AutoLoadToggle
+                local JsonInput
+                local jsonText = ""
+
                 local function RefreshList()
                     local list = GuiFunc:GetConfigs()
                     if ConfigList and ConfigList.SetValues then
@@ -3076,67 +3423,134 @@ function Chloex:Window(GuiConfig)
                     end
                 end
 
+                -- Read the name the user actually typed, live from the textbox.
+                -- Relying on the input's FocusLost callback is unreliable in some
+                -- executors (clicking the Save button may not fire it first).
+                local function ResolveName()
+                    local live = (NameInput and NameInput.Get and NameInput:Get()) or currentName or ""
+                    if live ~= "" then currentName = live end
+                    return live
+                end
+
                 ConfigList = Items:AddDropdown({
                     Title    = "Saved Configs",
                     Content  = "Select a config",
                     Multi    = false,
                     Options  = GuiFunc:GetConfigs(),
-                    Callback = function(choice) selectedConfig = choice end,
+                    Default  = selectedConfig,
+                    NoConfig = true,
+                    Callback = function(choice)
+                        selectedConfig = choice
+                        if choice and choice ~= "" then
+                            currentName = choice
+                            if NameInput and NameInput.Set then
+                                NameInput:Set(choice)
+                            end
+                        end
+                    end,
                 })
+
+                local function DoSave()
+                    -- Prefer the name typed in the box; fall back to the selected config.
+                    local targetName = ResolveName()
+                    if targetName == "" then targetName = selectedConfig or "" end
+                    local ok, savedName = GuiFunc:SaveConfigAs(targetName)
+                    if ok then
+                        selectedConfig = savedName or targetName
+                        if NameInput and NameInput.Set then
+                            NameInput:Set(selectedConfig)
+                        end
+                        RefreshList()
+                    end
+                    return ok
+                end
 
                 Items:AddButton({
                     Title    = "Save",
-                    SubTitle = "Load",
-                    Callback = function()
-                        if GuiFunc:SaveConfigAs(currentName) then
-                            selectedConfig = currentName
-                            RefreshList()
-                        end
-                    end,
-                    SubCallback = function()
-                        if selectedConfig then GuiFunc:LoadConfigByName(selectedConfig) end
-                    end,
+                    SubTitle = "Save As",
+                    Callback = DoSave,
+                    SubCallback = DoSave,
                 })
 
                 Items:AddButton({
-                    Title    = "Delete",
-                    SubTitle = "Refresh List",
+                    Title    = "Load",
+                    SubTitle = "Delete",
                     Callback = function()
+                        if selectedConfig then GuiFunc:LoadConfigByName(selectedConfig) end
+                    end,
+                    SubCallback = function()
                         if selectedConfig then
                             GuiFunc:DeleteConfig(selectedConfig)
                             selectedConfig = nil
                             RefreshList()
                         end
                     end,
-                    SubCallback = function()
-                        RefreshList()
-                    end,
                 })
 
-                local autoName = GuiFunc:GetAutoLoad()
-                Items:AddToggle({
+                local autoToggleReady = false
+                AutoLoadToggle = Items:AddToggle({
                     Title    = "Auto Load",
                     Content  = autoName ~= "" and ("Auto: " .. autoName) or "Load selected on startup",
                     Default  = autoName ~= "",
+                    NoConfig = true,
                     Callback = function(value)
-                        if value and selectedConfig then
-                            GuiFunc:SetAutoLoad(selectedConfig)
-                            than("Auto load set to '" .. selectedConfig .. "'", 4, GuiConfig.Color, "WisHub", "Config")
+                        if not autoToggleReady then return end
+                        if value then
+                            -- Resolve the target: a selected config, or the name typed in the box.
+                            local name = selectedConfig
+                            if not name or name == "" then name = ResolveName() end
+                            if not name or name == "" then
+                                GuiFunc:SetAutoLoad("", false)
+                                than("Enter a config name first", 4, Color3.fromRGB(255, 170, 0), "WisHub", "Config")
+                                if AutoLoadToggle then
+                                    task.defer(function() AutoLoadToggle:Set(false) end)
+                                end
+                                return
+                            end
+                            -- Make sure the config file exists before pointing autoload at it.
+                            if not (isfile and isfile(GetConfigPath(name))) then
+                                if not GuiFunc:SaveConfigAs(name) then
+                                    if AutoLoadToggle then
+                                        task.defer(function() AutoLoadToggle:Set(false) end)
+                                    end
+                                    return
+                                end
+                                RefreshList()
+                            end
+                            selectedConfig = name
+                            GuiFunc:SetAutoLoad(name, true)
+                            than("Auto load set to '" .. name .. "'", 4, GuiConfig.Color, "WisHub", "Config")
                         else
-                            GuiFunc:SetAutoLoad("")
+                            GuiFunc:SetAutoLoad("", false)
                         end
                     end,
                 })
+                autoToggleReady = true
+
+                JsonInput = Items:AddInput({
+                    Title       = "Config JSON",
+                    Content     = "Paste JSON for import or export",
+                    Placeholder = "{\"Data\":{}}",
+                    NoConfig    = true,
+                    Callback    = function(text) jsonText = text end,
+                })
 
                 Items:AddButton({
-                    Title    = "Export to Clipboard",
-                    SubTitle = "Import from Clipboard",
+                    Title    = "Export JSON",
+                    SubTitle = "Import JSON",
                     Callback = function()
-                        GuiFunc:ExportConfig()
+                        local payload = GuiFunc:ExportConfig()
+                        jsonText = payload
+                        if JsonInput and JsonInput.Set then
+                            JsonInput:Set(payload)
+                        end
                     end,
                     SubCallback = function()
-                        local clip = (getclipboard and getclipboard()) or ""
-                        GuiFunc:ImportConfig(clip)
+                        local input = jsonText
+                        if (not input or input == "") and getclipboard then
+                            input = getclipboard()
+                        end
+                        GuiFunc:ImportConfig(input)
                     end,
                 })
 
@@ -3395,13 +3809,13 @@ function Chloex:Window(GuiConfig)
             end
 
             CountSection = CountSection + 1
-            return Items
+            return FreezeIfProtected(Items, GuiConfig.Protection)
         end
 
         CountTab = CountTab + 1
         local safeName = TabConfig.Name:gsub("%s+", "_")
         _G[safeName] = Sections
-        return Sections
+        return FreezeIfProtected(Sections, GuiConfig.Protection)
     end
 
     function Tabs:InfoTab(InfoConfig)
@@ -3478,7 +3892,8 @@ function Chloex:Window(GuiConfig)
         end
     end)
 
-    return Tabs
+    FreezeIfProtected(GuiFunc, GuiConfig.Protection)
+    return FreezeIfProtected(Tabs, GuiConfig.Protection)
 end
 
 return Chloex
