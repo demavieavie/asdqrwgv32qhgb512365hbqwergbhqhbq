@@ -105,10 +105,231 @@ local Icons = {
 
 local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
+local TextService = game:GetService("TextService")
 local LocalPlayer = game:GetService("Players").LocalPlayer
 local Mouse = LocalPlayer:GetMouse()
 local CoreGui = game:GetService("CoreGui")
 local viewport = workspace.CurrentCamera.ViewportSize
+
+local WISHUB_GUI_NAME = "NatUI"
+local WISHUB_TOGGLE_GUI_NAME = "ToggleUIButton"
+local WISHUB_NOTIFY_GUI_NAME = "NotifyGui"
+local WISHUB_LOCK_KEY = "__WishHubActive"
+local WISHUB_SECURITY_KEY = "__WishHubSecurity"
+local WISHUB_KICK_MESSAGE = "KALAU WISHUB YA WISHUB AJA, WISHUB GASUKA DI DUAIN :("
+
+local function GetExecutorEnvironment()
+    if getgenv then
+        local ok, env = pcall(getgenv)
+        if ok and type(env) == "table" then
+            return env
+        end
+    end
+    return _G
+end
+
+local function KickWishHubLocked()
+    pcall(function()
+        if LocalPlayer then
+            LocalPlayer:Kick(WISHUB_KICK_MESSAGE)
+        end
+    end)
+end
+
+local function FreezeIfProtected(value, enabled)
+    if enabled and type(value) == "table" and table.freeze then
+        pcall(function()
+            table.freeze(value)
+        end)
+    end
+    return value
+end
+
+local function MakeBlockedTabs()
+    local noop = function() end
+    local paragraph = {
+        Instances = {},
+        Set = noop,
+        SetTitle = noop,
+        SetContent = noop,
+        Destroy = noop,
+    }
+    local items = {}
+    function items:AddParagraph() return paragraph end
+    function items:AddPanel() return { Set = noop, GetInput = function() return "" end, Instances = {} } end
+    function items:AddButton() return nil end
+    function items:AddToggle() return { Set = noop, Value = false, Instances = {} } end
+    function items:AddSlider() return { Set = noop, Value = 0, Instances = {} } end
+    function items:AddInput() return { Set = noop, Value = "", Instances = {} } end
+    function items:AddDropdown() return { Set = noop, AddOption = noop, RemoveOption = noop, Refresh = noop, Value = nil, Instances = {} } end
+    function items:AddConfig() return { Refresh = noop } end
+    function items:AddBanner() return nil end
+    function items:AddCard() return nil end
+    function items:AddDivider() return nil end
+    function items:AddSubSection() return nil end
+
+    local sections = {}
+    function sections:AddSection() return items end
+
+    local tabs = {
+        Window = {
+            DestroyGui = noop,
+            ToggleUI = noop,
+            ExportConfig = function() return "" end,
+            ImportConfig = function() return false end,
+        },
+    }
+    function tabs:AddTab() return sections end
+    function tabs:InfoTab() return sections, items end
+    tabs.ExportConfig = function() return "" end
+    tabs.ImportConfig = function() return false end
+    return tabs
+end
+
+local function FindUnsafeEnvironmentMarker()
+    local env = GetExecutorEnvironment()
+    local markers = {
+        "SimpleSpy",
+        "SimpleSpyExecuted",
+        "RemoteSpy",
+        "RemoteSpyExecuted",
+        "Hydroxide",
+        "HTTPSpy",
+        "HttpSpy",
+        "HttpLogger",
+        "HTTPLogger",
+        "HttpGetLogger",
+        "request_logger",
+        "http_logger",
+        "CobaltRemoteSpy",
+    }
+
+    for _, key in ipairs(markers) do
+        local ok, value = pcall(function()
+            return env[key]
+        end)
+        if ok and value ~= nil then
+            return key
+        end
+    end
+end
+
+local function IsForeignUiCandidate(child, strictUiLock)
+    if not child or not child:IsA("ScreenGui") then
+        return false
+    end
+
+    if strictUiLock then
+        return true
+    end
+
+    local name = string.lower(tostring(child.Name or ""))
+    name = name:gsub("[%s_%-%[%]%.]", "")
+
+    local blockedNames = {
+        "simplespy",
+        "remotespy",
+        "httpspy",
+        "httplogger",
+        "hydroxide",
+        "darkdex",
+        "infiniteyield",
+        "rayfield",
+        "orion",
+        "kavo",
+        "linoria",
+        "fluent",
+        "windui",
+        "venyx",
+        "mercury",
+    }
+
+    for _, blockedName in ipairs(blockedNames) do
+        if string.find(name, blockedName, 1, true) then
+            return true
+        end
+    end
+
+    return false
+end
+
+local function ReleaseWishHubProtection()
+    local env = GetExecutorEnvironment()
+    local security = env[WISHUB_SECURITY_KEY]
+    if type(security) == "table" then
+        for _, connection in pairs(security.Connections or {}) do
+            pcall(function()
+                connection:Disconnect()
+            end)
+        end
+    end
+    env[WISHUB_SECURITY_KEY] = nil
+    env[WISHUB_LOCK_KEY] = nil
+end
+
+local function AllowWishHubInstance(instance)
+    if not instance then return end
+    local security = GetExecutorEnvironment()[WISHUB_SECURITY_KEY]
+    if type(security) == "table" then
+        security.AllowedInstances = security.AllowedInstances or {}
+        security.AllowedInstances[instance] = true
+    end
+end
+
+local function StartWishHubProtection(guiConfig)
+    local env = GetExecutorEnvironment()
+    local strictUiLock = guiConfig and guiConfig.StrictUILock == true
+    if env[WISHUB_LOCK_KEY] or CoreGui:FindFirstChild(WISHUB_GUI_NAME) or CoreGui:FindFirstChild(WISHUB_TOGGLE_GUI_NAME) then
+        KickWishHubLocked()
+        return false
+    end
+
+    if FindUnsafeEnvironmentMarker() then
+        KickWishHubLocked()
+        return false
+    end
+
+    local baseline = {}
+    for _, child in ipairs(CoreGui:GetChildren()) do
+        baseline[child] = true
+    end
+
+    env[WISHUB_LOCK_KEY] = {
+        Active = true,
+        PlaceId = game.PlaceId,
+        Title = guiConfig and guiConfig.Title or "WisHub",
+        StartedAt = os.clock(),
+    }
+
+    local connections = {}
+    local security = { Connections = connections, AllowedInstances = {} }
+    env[WISHUB_SECURITY_KEY] = security
+
+    connections[#connections + 1] = CoreGui.ChildAdded:Connect(function(child)
+        task.defer(function()
+            local activeSecurity = env[WISHUB_SECURITY_KEY]
+            local allowedInstances = type(activeSecurity) == "table" and activeSecurity.AllowedInstances or nil
+            if not child or not child.Parent or baseline[child] or (allowedInstances and allowedInstances[child]) then
+                return
+            end
+            if IsForeignUiCandidate(child, strictUiLock) then
+                KickWishHubLocked()
+            end
+        end)
+    end)
+
+    task.spawn(function()
+        while env[WISHUB_LOCK_KEY] do
+            if FindUnsafeEnvironmentMarker() then
+                KickWishHubLocked()
+                break
+            end
+            task.wait(1)
+        end
+    end)
+
+    return true
+end
 
 local function isMobileDevice()
     return UserInputService.TouchEnabled
@@ -288,7 +509,8 @@ function Chloex:MakeNotify(NotifyConfig)
         if not CoreGui:FindFirstChild("NotifyGui") then
             local NotifyGui = Instance.new("ScreenGui");
             NotifyGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-            NotifyGui.Name = "NotifyGui"
+            NotifyGui.Name = WISHUB_NOTIFY_GUI_NAME
+            AllowWishHubInstance(NotifyGui)
             NotifyGui.Parent = CoreGui
         end
         if not CoreGui.NotifyGui:FindFirstChild("NotifyLayout") then
@@ -491,6 +713,12 @@ function Chloex:Window(GuiConfig)
     GuiConfig["Tab Width"] = GuiConfig["Tab Width"] or 120
     GuiConfig.Version      = GuiConfig.Version or 1
     if GuiConfig.Search == nil then GuiConfig.Search = true end
+    if GuiConfig.Protection == nil then GuiConfig.Protection = true end
+    if GuiConfig.StrictUILock == nil then GuiConfig.StrictUILock = false end
+
+    if GuiConfig.Protection and not StartWishHubProtection(GuiConfig) then
+        return MakeBlockedTabs()
+    end
 
     CURRENT_VERSION        = GuiConfig.Version
     LoadConfigFromFile()
@@ -667,9 +895,10 @@ function Chloex:Window(GuiConfig)
     local LayersPageLayout = Instance.new("UIPageLayout");
 
     NatUI.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-    NatUI.Name = "NatUI"
+    NatUI.Name = WISHUB_GUI_NAME
     NatUI.ResetOnSpawn = false
-    NatUI.Parent = game:GetService("CoreGui")
+    AllowWishHubInstance(NatUI)
+    NatUI.Parent = CoreGui
 
     DropShadowHolder.BackgroundTransparency = 1
     DropShadowHolder.BorderSizePixel = 0
@@ -1157,9 +1386,14 @@ function Chloex:Window(GuiConfig)
     end
 
     function GuiFunc:DestroyGui()
-        if CoreGui:FindFirstChild("NatUI") then
+        if CoreGui:FindFirstChild(WISHUB_GUI_NAME) then
             NatUI:Destroy()
         end
+        local toggleGui = CoreGui:FindFirstChild(WISHUB_TOGGLE_GUI_NAME)
+        if toggleGui then
+            toggleGui:Destroy()
+        end
+        ReleaseWishHubProtection()
     end
 
     Min.Activated:Connect(function()
@@ -1265,9 +1499,11 @@ function Chloex:Window(GuiConfig)
 
         Yes.MouseButton1Click:Connect(function()
             if NatUI then NatUI:Destroy() end
-            if game.CoreGui:FindFirstChild("ToggleUIButton") then
-                game.CoreGui.ToggleUIButton:Destroy()
+            local toggleGui = CoreGui:FindFirstChild(WISHUB_TOGGLE_GUI_NAME)
+            if toggleGui then
+                toggleGui:Destroy()
             end
+            ReleaseWishHubProtection()
         end)
 
         Cancel.MouseButton1Click:Connect(function()
@@ -1276,10 +1512,16 @@ function Chloex:Window(GuiConfig)
     end)
 
     function GuiFunc:ToggleUI()
+        local toggleGui = CoreGui:FindFirstChild(WISHUB_TOGGLE_GUI_NAME)
+        if toggleGui then
+            toggleGui:Destroy()
+        end
+
         local ScreenGui = Instance.new("ScreenGui")
-        ScreenGui.Parent = game:GetService("CoreGui")
         ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-        ScreenGui.Name = "ToggleUIButton"
+        ScreenGui.Name = WISHUB_TOGGLE_GUI_NAME
+        AllowWishHubInstance(ScreenGui)
+        ScreenGui.Parent = CoreGui
 
         local MainButton = Instance.new("ImageLabel")
         MainButton.Parent = ScreenGui
@@ -1850,19 +2092,36 @@ function Chloex:Window(GuiConfig)
             local CountItem = 0
 
             function Items:AddParagraph(ParagraphConfig)
-                local ParagraphConfig = ParagraphConfig or {}
-                ParagraphConfig.Title = ParagraphConfig.Title or "Title"
-                ParagraphConfig.Content = ParagraphConfig.Content or "Content"
-                local ParagraphFunc = {}
+                ParagraphConfig = ParagraphConfig or {}
+                ParagraphConfig.Title = ParagraphConfig.Title or ParagraphConfig.Name or "Title"
+                ParagraphConfig.Content = ParagraphConfig.Content or ParagraphConfig.Description or ParagraphConfig.Text or "Content"
+                ParagraphConfig.ButtonText = ParagraphConfig.ButtonText or ParagraphConfig.Button
+                ParagraphConfig.ButtonCallback = ParagraphConfig.ButtonCallback or ParagraphConfig.Callback
 
                 local Paragraph = Instance.new("Frame")
                 local UICorner14 = Instance.new("UICorner")
                 local ParagraphTitle = Instance.new("TextLabel")
                 local ParagraphContent = Instance.new("TextLabel")
+                local ParagraphButton
+                local ParagraphIcon
+                local leftPadding = 10
+                local rightPadding = 10
+
+                local ParagraphFunc = {
+                    Value = ParagraphConfig.Content,
+                    Instances = {
+                        Root = Paragraph,
+                        Corner = UICorner14,
+                        Title = ParagraphTitle,
+                        Content = ParagraphContent,
+                    },
+                }
 
                 Paragraph.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
                 Paragraph.BackgroundTransparency = 0.935
+                Paragraph.BorderColor3 = Color3.fromRGB(0, 0, 0)
                 Paragraph.BorderSizePixel = 0
+                Paragraph.ClipsDescendants = false
                 Paragraph.LayoutOrder = CountItem
                 Paragraph.Size = UDim2.new(1, 0, 0, 46)
                 Paragraph.Name = "Paragraph"
@@ -1871,91 +2130,161 @@ function Chloex:Window(GuiConfig)
                 UICorner14.CornerRadius = UDim.new(0, 4)
                 UICorner14.Parent = Paragraph
 
-                local iconOffset = 10
-                if ParagraphConfig.Icon then
-                    local IconImg = Instance.new("ImageLabel")
-                    IconImg.Size = UDim2.new(0, 20, 0, 20)
-                    IconImg.Position = UDim2.new(0, 8, 0, 12)
-                    IconImg.BackgroundTransparency = 1
-                    IconImg.Name = "ParagraphIcon"
-                    IconImg.Parent = Paragraph
+                if ParagraphConfig.Icon and tostring(ParagraphConfig.Icon) ~= "" then
+                    ParagraphIcon = Instance.new("ImageLabel")
+                    ParagraphIcon.Size = UDim2.new(0, 20, 0, 20)
+                    ParagraphIcon.Position = UDim2.new(0, 8, 0, 12)
+                    ParagraphIcon.BackgroundTransparency = 1
+                    ParagraphIcon.BorderSizePixel = 0
+                    ParagraphIcon.Name = "ParagraphIcon"
+                    ParagraphIcon.Parent = Paragraph
+                    ParagraphFunc.Instances.Icon = ParagraphIcon
 
                     if Icons and Icons[ParagraphConfig.Icon] then
-                        IconImg.Image = Icons[ParagraphConfig.Icon]
+                        ParagraphIcon.Image = Icons[ParagraphConfig.Icon]
                     else
-                        IconImg.Image = ParagraphConfig.Icon
+                        ParagraphIcon.Image = tostring(ParagraphConfig.Icon)
                     end
 
-                    iconOffset = 30
+                    leftPadding = 36
                 end
 
                 ParagraphTitle.Font = Enum.Font.GothamBold
-                ParagraphTitle.Text = ParagraphConfig.Title
+                ParagraphTitle.Text = tostring(ParagraphConfig.Title)
                 ParagraphTitle.TextColor3 = Color3.fromRGB(231, 231, 231)
                 ParagraphTitle.TextSize = 13
                 ParagraphTitle.TextXAlignment = Enum.TextXAlignment.Left
                 ParagraphTitle.TextYAlignment = Enum.TextYAlignment.Top
                 ParagraphTitle.BackgroundTransparency = 1
-                ParagraphTitle.Position = UDim2.new(0, iconOffset, 0, 10)
-                ParagraphTitle.Size = UDim2.new(1, -16, 0, 13)
+                ParagraphTitle.BorderSizePixel = 0
+                ParagraphTitle.Position = UDim2.new(0, leftPadding, 0, 9)
+                ParagraphTitle.Size = UDim2.new(1, -(leftPadding + rightPadding), 0, 16)
                 ParagraphTitle.Name = "ParagraphTitle"
                 ParagraphTitle.Parent = Paragraph
 
                 ParagraphContent.Font = Enum.Font.Gotham
-                ParagraphContent.Text = ParagraphConfig.Content
+                ParagraphContent.Text = tostring(ParagraphConfig.Content)
                 ParagraphContent.TextColor3 = Color3.fromRGB(255, 255, 255)
                 ParagraphContent.TextSize = 12
                 ParagraphContent.TextXAlignment = Enum.TextXAlignment.Left
                 ParagraphContent.TextYAlignment = Enum.TextYAlignment.Top
                 ParagraphContent.BackgroundTransparency = 1
-                ParagraphContent.Position = UDim2.new(0, iconOffset, 0, 25)
+                ParagraphContent.BorderSizePixel = 0
+                ParagraphContent.Position = UDim2.new(0, leftPadding, 0, 26)
+                ParagraphContent.Size = UDim2.new(1, -(leftPadding + rightPadding), 0, 16)
                 ParagraphContent.Name = "ParagraphContent"
-                ParagraphContent.TextWrapped = false
-                ParagraphContent.RichText = true
+                ParagraphContent.TextWrapped = true
+                ParagraphContent.RichText = ParagraphConfig.RichText ~= false
                 ParagraphContent.Parent = Paragraph
 
-                ParagraphContent.Size = UDim2.new(1, -16, 0, ParagraphContent.TextBounds.Y)
-
-                local ParagraphButton
                 if ParagraphConfig.ButtonText then
                     ParagraphButton = Instance.new("TextButton")
-                    ParagraphButton.Position = UDim2.new(0, 10, 0, 42)
-                    ParagraphButton.Size = UDim2.new(1, -22, 0, 28)
+                    ParagraphButton.Position = UDim2.new(0, 10, 0, 44)
+                    ParagraphButton.Size = UDim2.new(1, -20, 0, 28)
                     ParagraphButton.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
                     ParagraphButton.BackgroundTransparency = 0.935
+                    ParagraphButton.BorderSizePixel = 0
                     ParagraphButton.Font = Enum.Font.GothamBold
                     ParagraphButton.TextSize = 12
                     ParagraphButton.TextTransparency = 0.3
                     ParagraphButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-                    ParagraphButton.Text = ParagraphConfig.ButtonText
+                    ParagraphButton.Text = tostring(ParagraphConfig.ButtonText)
+                    ParagraphButton.Name = "ParagraphButton"
                     ParagraphButton.Parent = Paragraph
+                    ParagraphFunc.Instances.Button = ParagraphButton
 
                     local btnCorner = Instance.new("UICorner")
                     btnCorner.CornerRadius = UDim.new(0, 6)
                     btnCorner.Parent = ParagraphButton
+                    ParagraphFunc.Instances.ButtonCorner = btnCorner
 
                     if ParagraphConfig.ButtonCallback then
-                        ParagraphButton.MouseButton1Click:Connect(ParagraphConfig.ButtonCallback)
+                        ParagraphButton.Activated:Connect(ParagraphConfig.ButtonCallback)
                     end
+                end
+
+                local function GetTextHeight(label)
+                    local width = label.AbsoluteSize.X
+                    if width <= 0 then
+                        local parentWidth = Paragraph.AbsoluteSize.X
+                        if parentWidth <= 0 then
+                            parentWidth = SectionAdd.AbsoluteSize.X
+                        end
+                        width = math.max(20, parentWidth - leftPadding - rightPadding)
+                    end
+
+                    local ok, size = pcall(function()
+                        return TextService:GetTextSize(label.Text, label.TextSize, label.Font, Vector2.new(width, math.huge))
+                    end)
+
+                    if ok and size then
+                        return math.ceil(size.Y)
+                    end
+
+                    return math.max(label.TextSize, label.TextBounds.Y)
+                end
+
+                local resizeQueued = false
+                local function QueueSectionResize()
+                    if resizeQueued then return end
+                    resizeQueued = true
+                    task.defer(function()
+                        resizeQueued = false
+                        UpdateSizeSection()
+                    end)
                 end
 
                 local function UpdateSize()
-                    local totalHeight = ParagraphContent.TextBounds.Y + 33
+                    local contentHeight = math.max(14, GetTextHeight(ParagraphContent))
+                    ParagraphTitle.Size = UDim2.new(1, -(leftPadding + rightPadding), 0, 16)
+                    ParagraphContent.Size = UDim2.new(1, -(leftPadding + rightPadding), 0, contentHeight)
+
+                    local totalHeight = 26 + contentHeight + 10
                     if ParagraphButton then
-                        totalHeight = totalHeight + ParagraphButton.Size.Y.Offset + 5
+                        local buttonTop = 26 + contentHeight + 8
+                        ParagraphButton.Position = UDim2.new(0, 10, 0, buttonTop)
+                        totalHeight = buttonTop + ParagraphButton.Size.Y.Offset + 8
                     end
-                    Paragraph.Size = UDim2.new(1, 0, 0, totalHeight)
+
+                    Paragraph.Size = UDim2.new(1, 0, 0, math.max(46, totalHeight))
+                    QueueSectionResize()
                 end
 
-                UpdateSize()
+                ParagraphContent:GetPropertyChangedSignal("Text"):Connect(UpdateSize)
+                Paragraph:GetPropertyChangedSignal("AbsoluteSize"):Connect(UpdateSize)
 
-                ParagraphContent:GetPropertyChangedSignal("TextBounds"):Connect(UpdateSize)
+                function ParagraphFunc:SetTitle(title)
+                    ParagraphTitle.Text = tostring(title or "Title")
+                    RegisterSearch({ label = ParagraphTitle.Text, tab = TabConfig.Name, kind = "Info", switch = SearchSwitch })
+                    UpdateSize()
+                end
 
                 function ParagraphFunc:SetContent(content)
                     content = content or "Content"
-                    ParagraphContent.Text = content
+                    ParagraphFunc.Value = content
+                    ParagraphContent.Text = tostring(content)
                     UpdateSize()
                 end
+
+                function ParagraphFunc:Set(data)
+                    if type(data) == "table" then
+                        if data.Title or data.Name then
+                            ParagraphFunc:SetTitle(data.Title or data.Name)
+                        end
+                        if data.Content or data.Description or data.Text then
+                            ParagraphFunc:SetContent(data.Content or data.Description or data.Text)
+                        end
+                    else
+                        ParagraphFunc:SetContent(data)
+                    end
+                end
+
+                function ParagraphFunc:Destroy()
+                    Paragraph:Destroy()
+                    QueueSectionResize()
+                end
+
+                task.defer(UpdateSize)
 
                 CountItem = CountItem + 1
                 RegisterSearch({ label = ParagraphConfig.Title, tab = TabConfig.Name, kind = "Info", switch = SearchSwitch })
@@ -3521,13 +3850,13 @@ function Chloex:Window(GuiConfig)
             end
 
             CountSection = CountSection + 1
-            return Items
+            return FreezeIfProtected(Items, GuiConfig.Protection)
         end
 
         CountTab = CountTab + 1
         local safeName = TabConfig.Name:gsub("%s+", "_")
         _G[safeName] = Sections
-        return Sections
+        return FreezeIfProtected(Sections, GuiConfig.Protection)
     end
 
     function Tabs:InfoTab(InfoConfig)
@@ -3604,7 +3933,8 @@ function Chloex:Window(GuiConfig)
         end
     end)
 
-    return Tabs
+    FreezeIfProtected(GuiFunc, GuiConfig.Protection)
+    return FreezeIfProtected(Tabs, GuiConfig.Protection)
 end
 
 return Chloex
