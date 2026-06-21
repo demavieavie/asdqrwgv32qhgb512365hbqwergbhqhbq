@@ -1478,7 +1478,9 @@ function Chloex:Window(GuiConfig)
     UIListLayout.Parent = ScrollTab
 
     local function UpdateSize1()
-        ScrollTab.CanvasSize = UDim2.new(0, 0, 0, UIListLayout.AbsoluteContentSize.Y + 6)
+        pcall(function()
+            ScrollTab.CanvasSize = UDim2.new(0, 0, 0, UIListLayout.AbsoluteContentSize.Y + 6)
+        end)
     end
     UIListLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(UpdateSize1)
     ScrollTab.ChildAdded:Connect(UpdateSize1)
@@ -1558,7 +1560,9 @@ function Chloex:Window(GuiConfig)
         SearchPad.Parent = SearchResults
 
         SearchResultsLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-            SearchResults.CanvasSize = UDim2.new(0, 0, 0, SearchResultsLayout.AbsoluteContentSize.Y + 8)
+            pcall(function()
+                SearchResults.CanvasSize = UDim2.new(0, 0, 0, SearchResultsLayout.AbsoluteContentSize.Y + 8)
+            end)
         end)
 
         local function RunSearch()
@@ -2358,13 +2362,19 @@ function Chloex:Window(GuiConfig)
                 UpdateSizeScroll()
             end
 
-            SectionAdd.ChildAdded:Connect(UpdateSizeSection)
-            SectionAdd.ChildRemoved:Connect(UpdateSizeSection)
+            local function SafeUpdateSizeSection()
+                pcall(UpdateSizeSection)
+            end
+
+            SectionAdd.ChildAdded:Connect(SafeUpdateSizeSection)
+            SectionAdd.ChildRemoved:Connect(SafeUpdateSizeSection)
 
             local layout = ScrolLayers:FindFirstChildOfClass("UIListLayout")
             if layout then
                 layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-                    ScrolLayers.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 10)
+                    pcall(function()
+                        ScrolLayers.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 10)
+                    end)
                 end)
             end
 
@@ -3512,28 +3522,34 @@ function Chloex:Window(GuiConfig)
                 UIListLayout4.Parent = ScrollSelect
 
                 UIListLayout4:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-                    ScrollSelect.CanvasSize = UDim2.new(0, 0, 0, UIListLayout4.AbsoluteContentSize.Y)
+                    pcall(function()
+                        ScrollSelect.CanvasSize = UDim2.new(0, 0, 0, UIListLayout4.AbsoluteContentSize.Y)
+                    end)
                 end)
 
                 SearchBox:GetPropertyChangedSignal("Text"):Connect(function()
                     local query = string.lower(SearchBox.Text)
-                    for _, option in pairs(ScrollSelect:GetChildren()) do
-                        if option.Name == "Option" and option:FindFirstChild("OptionText") then
-                            local text = string.lower(option.OptionText.Text)
-                            option.Visible = query == "" or string.find(text, query, 1, true)
+                    pcall(function()
+                        for _, option in pairs(ScrollSelect:GetChildren()) do
+                            if option.Name == "Option" and option:FindFirstChild("OptionText") then
+                                local text = string.lower(option.OptionText.Text)
+                                option.Visible = query == "" or string.find(text, query, 1, true)
+                            end
                         end
-                    end
-                    ScrollSelect.CanvasSize = UDim2.new(0, 0, 0, UIListLayout4.AbsoluteContentSize.Y)
+                        ScrollSelect.CanvasSize = UDim2.new(0, 0, 0, UIListLayout4.AbsoluteContentSize.Y)
+                    end)
                 end)
 
                 local DropCount = 0
 
                 function DropdownFunc:Clear()
-                    for _, DropFrame in ScrollSelect:GetChildren() do
-                        if DropFrame.Name == "Option" then
-                            DropFrame:Destroy()
+                    pcall(function()
+                        for _, DropFrame in ScrollSelect:GetChildren() do
+                            if DropFrame.Name == "Option" then
+                                DropFrame:Destroy()
+                            end
                         end
-                    end
+                    end)
                     DropdownFunc.Value = DropdownConfig.Multi and {} or nil
                     DropdownFunc.Options = {}
                     OptionSelecting.Text = DropdownConfig.Multi and "Select Options" or "Select Option"
@@ -3902,33 +3918,39 @@ function Chloex:Window(GuiConfig)
                 BannerCorner.Parent = Banner
 
                 local function FitHeight()
-                    local w = Banner.AbsoluteSize.X
-                    if w > 0 then
-                        local h = math.floor(w / ratio)
-                        if math.abs(Banner.Size.Y.Offset - h) > 1 then
-                            Banner.Size = UDim2.new(1, 0, 0, h)
-                            UpdateSizeSection()
+                    pcall(function()
+                        local w = Banner.AbsoluteSize.X
+                        if w > 0 then
+                            local h = math.floor(w / ratio)
+                            if math.abs(Banner.Size.Y.Offset - h) > 1 then
+                                Banner.Size = UDim2.new(1, 0, 0, h)
+                                pcall(UpdateSizeSection)
+                            end
                         end
-                    end
+                    end)
                 end
 
                 if asset ~= "" then
-                    local Img = Instance.new("ImageLabel")
-                    Img.Image = asset
-                    Img.BackgroundTransparency = 1
-                    Img.ScaleType = Enum.ScaleType.Crop
-                    Img.Size = UDim2.new(1, 0, 1, 0)
-                    Img.Name = "BannerImage"
-                    Img.Parent = Banner
+                    pcall(function()
+                        local Img = Instance.new("ImageLabel")
+                        Img.Image = asset
+                        Img.BackgroundTransparency = 1
+                        Img.ScaleType = Enum.ScaleType.Crop
+                        Img.Size = UDim2.new(1, 0, 1, 0)
+                        Img.Name = "BannerImage"
+                        Img.Parent = Banner
+                    end)
                 else
-                    local Grad = Instance.new("UIGradient")
-                    Grad.Color = ColorSequence.new {
-                        ColorSequenceKeypoint.new(0, Color3.fromRGB(20, 20, 20)),
-                        ColorSequenceKeypoint.new(0.5, GuiConfig.Color),
-                        ColorSequenceKeypoint.new(1, Color3.fromRGB(20, 20, 20))
-                    }
-                    Grad.Rotation = 25
-                    Grad.Parent = Banner
+                    pcall(function()
+                        local Grad = Instance.new("UIGradient")
+                        Grad.Color = ColorSequence.new {
+                            ColorSequenceKeypoint.new(0, Color3.fromRGB(20, 20, 20)),
+                            ColorSequenceKeypoint.new(0.5, GuiConfig.Color),
+                            ColorSequenceKeypoint.new(1, Color3.fromRGB(20, 20, 20))
+                        }
+                        Grad.Rotation = 25
+                        Grad.Parent = Banner
+                    end)
                 end
 
                 if BannerConfig.Version then
